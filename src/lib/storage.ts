@@ -17,7 +17,8 @@ function isValidTicker(v: unknown): v is Ticker {
     typeof t.status === "string" &&
     TICKER_STATUSES.includes(t.status as TickerStatus) &&
     typeof t.createdAt === "string" &&
-    typeof t.updatedAt === "string"
+    typeof t.updatedAt === "string" &&
+    (t.importedFrom === undefined || typeof t.importedFrom === "string")
   );
 }
 

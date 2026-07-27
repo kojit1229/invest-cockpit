@@ -41,6 +41,8 @@ export interface Ticker {
   /** YYYY-MM-DD形式(文字列Date解析は禁止。表示・記録専用) */
   createdAt: string;
   updatedAt: string;
+  /** 旧アプリからの一回限りインポートで追加された場合の由来ラベル(例: "需給ナビ")。手動追加はundefined。 */
+  importedFrom?: string;
 }
 
 /** localStorageキー `invest_koro_state_v1` に保存する値の形。 */

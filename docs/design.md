@@ -41,7 +41,8 @@ sold(売却済)   --再エントリー検討--> candidate(候補)
       "currency": "JPY",          // "JPY" | "USD"(市場から自動決定)
       "status": "watching",       // candidate|watching|holding|sold|passed
       "createdAt": "2026-07-27T09:00:00", // 追加時刻(ローカルタイムゾーン、YYYY-MM-DDTHH:mm:ss)
-      "updatedAt": "2026-07-27T09:00:00"  // 最終更新時刻(状態変更のたびに更新)
+      "updatedAt": "2026-07-27T09:00:00", // 最終更新時刻(状態変更のたびに更新)
+      "importedFrom": "需給ナビ"           // 任意。旧アプリからの一回限りインポートで追加された場合の由来ラベル。手動追加の銘柄には存在しない
     }
   ]
 }
@@ -73,3 +74,23 @@ sold(売却済)   --再エントリー検討--> candidate(候補)
 - **private側(`personal-data`リポジトリ、後続増分)**: 銘柄の共通ウォッチ状態、建玉、ストップ、投資仮説、判断ログ、採否ログ、AI生成物。(c)節の名前空間に集約する。
 - **第1増分時点の実データ所在**: localStorage(ブラウザ端末内)。これは技術的には「公開でも private でもない、端末ローカル」であり、GitHub Pagesの配信物には含まれない(ソースコードのみが配信される)。ただし端末間同期がないため、複数端末で使う場合は同一の状態が見えない制約がある。この制約はprivate repo同期(後続増分)で解消する。
 - GitHub Pagesの罠(`ai-linked-app-dev` Skill既知の原則): 「repoをprivateにすれば守られる」は誤り。本アプリの公開repoには最初から個人データを書き込む経路を作らない設計とする(ログイン画面も作らない。トークンゲート方式は private同期実装時に導入)。
+
+## (e) 増分2の調査結果(旧アプリの外部連携。事実として確認済み)
+
+GitHub Pagesは同一アカウントの全アプリが同一オリジン(`kojit1229.github.io`)のため、投資航路から他アプリのlocalStorageを直接読める(書き込みはしない)。以下は `repos/stock_supply_demand` と `repos/stock_analyze` のソースを実際に読んで確認した事実(推測ではない)。参照はこの増分の実装時点(2026-07-27)のもの。旧アプリ側の実装が変わればズレる可能性があるため、`src/lib/external.ts` の読み込みは寛容パース(壊れた形式は「読み込めません」表示にフォールバックし、例外を投げない)。
+
+**需給ナビ (`repos/stock_supply_demand/index.html`)**
+- localStorageキー: `jukyu_watchlist_v1`(`WATCHLIST_KEY`、`index.html:532`)
+- 値のスキーマ: `{ "schema_version": 1, "codes": ["7203", "285A", ...] }`(`codes`はJSDA銘柄コードの文字列配列。`loadWatchlist`/`saveWatchlist`、`index.html:686-707`)
+- 銘柄コード単体の詳細ページURL: ハッシュルート `#/issue/<code>`(`index.html:646`, `index.html:2332`)
+- 銘柄名はlocalStorageに保存されていない(表示時に`data/*.json`から`state.issueByCode[code]`で引く。`index.html:2241`, `index.html:2251`)。このためインポート候補の名称はcodeそのものを暫定値として使う。
+
+**決算ナビ (`repos/stock_analyze/frontend/local-api.js`)**
+- localStorageキー: `kessan_local_v1`(`STORE_KEY`、`local-api.js:116`)
+- 値のスキーマ: `{ mystocks: [{ user_id, code, registered_at, last_checked_at, holding_type, importance, memo, notify }], disclosures: [...], nextDiscId }`(`local-api.js:143-146`, `490-510`)。マイ銘柄は`mystocks`配列で、キーは`code`(TSE 4桁コードの文字列)。
+- 銘柄コード単体の詳細ページURL: ハッシュルート `#/stock/<code>`(`frontend/app.js:878`、各所のリンク生成で使用)
+- `mystocks`要素にも銘柄名は保存されていない(名称は`stocksByCode`経由で`data/*.json`から都度引く)。需給ナビ同様、インポート候補の名称はcodeを暫定値とする。
+
+**投資航路側のURL構築方針**
+- 深掘りリンクは本番のGitHub Pages URLを直書きする(`src/lib/external.ts` `kessanNaviUrl` / `jukyuNaviUrl`): `https://kojit1229.github.io/stock_analyze/#/stock/<code>` と `https://kojit1229.github.io/stock_supply_demand/#/issue/<code>`。開発環境(`npm run dev`)では投資航路自体のoriginが異なるためリンク先は開けないが、本番相当のURLを常に指すことを優先した(投資航路がどこで動いていても旧アプリは常にGitHub Pages上にあるため)。
+- 両アプリともJP銘柄コードのみを扱う(USはそもそも対象外)。投資航路のticker ID(`<Market>:<Code>`)から`Market`が`JP`の場合のみ深掘りリンクを表示する。
