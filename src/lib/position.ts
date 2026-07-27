@@ -23,6 +23,12 @@ export interface Position {
   stopLossAmount: number | null;
 }
 
+/** ラウンド1件分のtrade一覧(日付→createdAt→id順にソート済み)。closed=trueは保有数量が0に戻って終了したラウンド。 */
+export interface Round {
+  trades: Trade[];
+  closed: boolean;
+}
+
 /** 日付→createdAt→idの順で安定ソートする(同日の複数取引でも導出結果を決定的にする)。 */
 function sortTrades(trades: Trade[]): Trade[] {
   return [...trades].sort((a, b) => {
@@ -33,24 +39,56 @@ function sortTrades(trades: Trade[]): Trade[] {
 }
 
 /**
+ * 対象銘柄のtradeを、保有数量が0になった時点(フラット=建玉解消)を境界にラウンド単位へ分割する。
+ * `computePosition`(建玉導出)と`src/lib/review.ts`(週次レビューのラウンド集計)の両方が、
+ * ラウンド境界の基準としてこの関数を共通利用する(重複実装によるズレを防ぐ。docs/design.md 増分9節)。
+ * 最後のラウンドが一度もフラットに達していなければ(=現在も保有中)`closed: false`で返す。
+ */
+export function splitRounds(allTrades: Trade[], tickerId: string): Round[] {
+  const trades = sortTrades(allTrades.filter((t) => t.tickerId === tickerId));
+  const rounds: Round[] = [];
+  let current: Trade[] = [];
+  let qty = 0;
+
+  for (const t of trades) {
+    current.push(t);
+    qty = t.side === "buy" ? qty + t.qty : Math.max(0, qty - t.qty);
+    if (qty === 0) {
+      rounds.push({ trades: current, closed: true });
+      current = [];
+    }
+  }
+  if (current.length > 0) {
+    rounds.push({ trades: current, closed: false });
+  }
+  return rounds;
+}
+
+/**
  * 指定銘柄の建玉を、その銘柄のTrade一覧から導出する。tradesは全銘柄分を渡してよい(内部でtickerId絞り込みする)。
  *
- * ラウンド境界(reviewer重大4の修正): 保有数量が0になった時点(フラット=建玉解消)を新ラウンドの
- * 開始点とし、`stages`・`currentStop`はそのフラット以降のtradeだけから導出する。フラットにした
- * 売り自体がstopを宣言していても、そのstopは(建玉が無くなった時点のものなので)次ラウンドへ
- * 持ち越さずnullにリセットする。`avgPrice`は元々qty===0で0にリセットされるため、新ラウンドの
- * 買いから自然に正しい値が積み上がる(この点はフラット判定を待たずに従来から正しい)。
+ * ラウンド境界(reviewer重大4の修正、増分9で`splitRounds`へ抽出): 保有数量が0になった時点
+ * (フラット=建玉解消)を新ラウンドの開始点とし、`stages`・`currentStop`はそのフラット以降の
+ * tradeだけから導出する。直近ラウンドが未クローズ(`closed: false`)でなければ建玉なし(qty:0)を
+ * 返す。フラットにした売り自体がstopを宣言していても、そのstopは(建玉が無くなった時点のもの
+ * なので)次ラウンドへ持ち越さない(次ラウンドのtradeにそのtradeは含まれないため自然にリセット
+ * される)。
  */
 export function computePosition(allTrades: Trade[], tickerId: string): Position {
-  const trades = sortTrades(allTrades.filter((t) => t.tickerId === tickerId));
+  const rounds = splitRounds(allTrades, tickerId);
+  const openRound = rounds.length > 0 && !rounds[rounds.length - 1].closed ? rounds[rounds.length - 1] : null;
+
+  if (openRound === null) {
+    return { qty: 0, avgPrice: null, stages: [], currentStop: null, stopLossAmount: null };
+  }
 
   let qty = 0;
-  let avgPrice = 0; // qty>0の間だけ意味を持つ。qty===0では0にリセットする。
-  let stages: PositionStage[] = [];
+  let avgPrice = 0; // qty>0の間だけ意味を持つ。
+  const stages: PositionStage[] = [];
   let currentStop: number | null = null;
   let stageNo = 0;
 
-  for (const t of trades) {
+  for (const t of openRound.trades) {
     if (t.side === "buy") {
       const newQty = qty + t.qty;
       avgPrice = newQty > 0 ? (qty * avgPrice + t.qty * t.price) / newQty : 0;
@@ -59,17 +97,8 @@ export function computePosition(allTrades: Trade[], tickerId: string): Position 
       stages.push({ trade: t, stage: stageNo });
     } else {
       // 売り超過(データ不整合や手動削除の結果ありうる)は0でクランプし、マイナス建玉を作らない。
+      // openRound内でqtyが0になることは無い(0になった時点でsplitRoundsがラウンドを閉じるため)。
       qty = Math.max(0, qty - t.qty);
-      if (qty === 0) {
-        avgPrice = 0;
-        // フラット到達: 新ラウンドの開始点として段数・stopをリセットする(前ラウンドの遺物を残さない)。
-        // このフラットを起こした売りが同時にstopを宣言していても、建玉が無くなった以上そのstopは
-        // 次ラウンドに引き継がない(continueで下のstop反映をスキップする)。
-        stages = [];
-        currentStop = null;
-        stageNo = 0;
-        continue;
-      }
     }
     if (t.stop !== undefined) {
       currentStop = t.stop;

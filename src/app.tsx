@@ -24,6 +24,7 @@ import { SettingsPage } from "./components/SettingsPage";
 import { SyncIndicator } from "./components/SyncIndicator";
 import { ConflictDialog } from "./components/ConflictDialog";
 import { PassDialog } from "./components/PassDialog";
+import { ReviewPage } from "./components/ReviewPage";
 
 /** append-onlyの見送り履歴の上限(増分7、docs/design.md 増分7節)。超過分は古いものから削除する。 */
 const MAX_PASSED_EVENTS = 20;
@@ -373,6 +374,11 @@ export function App() {
           <SyncIndicator phase={syncPhase} error={syncError} />
         </div>
         <p class="app__tagline">今日の判断キュー</p>
+        {route.name === "today" && (
+          <a class="app__review-link" href="#/review">
+            週次レビューを見る
+          </a>
+        )}
       </header>
       <main>
         {route.name === "today" && (
@@ -424,6 +430,7 @@ export function App() {
             onSettingsChange={handleSettingsChange}
           />
         )}
+        {route.name === "review" && <ReviewPage tickers={state.tickers} trades={state.trades ?? []} />}
       </main>
       {conflict && (
         <ConflictDialog
