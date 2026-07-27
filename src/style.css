@@ -179,3 +179,143 @@ body {
   color: white;
   font-size: 1rem;
 }
+
+.import-link {
+  display: block;
+  margin-top: 16px;
+  font-size: 0.85rem;
+  color: var(--accent);
+  text-align: center;
+}
+
+.ticker-row__link {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.ticker-row__link:hover .ticker-row__name {
+  text-decoration: underline;
+}
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 16px;
+  font-size: 0.85rem;
+  color: var(--accent);
+}
+
+.ticker-detail h1 {
+  font-size: 1.2rem;
+  margin: 0 0 12px;
+}
+
+.ticker-detail__meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0 0 16px;
+  font-size: 0.9rem;
+}
+
+.ticker-detail__meta dt {
+  color: #666;
+}
+
+.ticker-detail__meta dd {
+  margin: 0;
+}
+
+.ticker-detail__status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  margin-bottom: 20px;
+}
+
+.ticker-detail__status select {
+  font-size: 1rem;
+  padding: 6px;
+}
+
+.ticker-detail__links h2 {
+  font-size: 1rem;
+  margin: 0 0 8px;
+}
+
+.ticker-detail__links ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ticker-detail__links a {
+  color: var(--accent);
+}
+
+.import-page h1 {
+  font-size: 1.2rem;
+  margin: 0 0 8px;
+}
+
+.import-page__hint {
+  font-size: 0.85rem;
+  color: #666;
+  margin: 0 0 16px;
+}
+
+.import-page__result {
+  font-size: 0.9rem;
+  color: var(--accent);
+  margin: 0 0 16px;
+}
+
+.import-page__source {
+  margin-bottom: 20px;
+}
+
+.import-page__source h2 {
+  font-size: 1rem;
+  margin: 0 0 8px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+
+.import-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.import-list__item label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+
+.import-list__badge {
+  font-size: 0.75rem;
+  color: #888;
+  background: #eee;
+  border-radius: 10px;
+  padding: 1px 8px;
+}
+
+.import-page button {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: white;
+  font-size: 1rem;
+}
