@@ -45,10 +45,52 @@ export interface Ticker {
   importedFrom?: string;
 }
 
-/** localStorageキー `invest_koro_state_v1` に保存する値の形。 */
+/** 取引の売買方向。 */
+export type TradeSide = "buy" | "sell";
+
+/**
+ * 取引記録の理由タグ プリセット(複数選択可、自由入力なし。増分3の確定仕様)。
+ * 追加・変更する場合は docs/design.md 側の契約を先に改訂すること。
+ */
+export const REASON_TAG_PRESETS = [
+  "高値ブレイク",
+  "買い増し(ピラミッディング)",
+  "決算好調",
+  "損切り",
+  "利確",
+  "ルール外(裁量)",
+] as const;
+
+export type ReasonTag = (typeof REASON_TAG_PRESETS)[number];
+
+/** 1件の取引記録(買い/売り)。建玉はstateに保存せず、これを元に毎回導出する(src/lib/position.ts)。 */
+export interface Trade {
+  id: string;
+  tickerId: TickerId;
+  side: TradeSide;
+  /** YYYY-MM-DD形式(文字列Date解析は禁止。表示・記録専用) */
+  date: string;
+  qty: number;
+  price: number;
+  /** この取引時点で宣言する損切りライン。任意。 */
+  stop?: number;
+  reasonTags: ReasonTag[];
+  memo?: string;
+  createdAt: string;
+}
+
+/** Trade新規作成時の入力形(id/createdAtはApp側で採番する)。 */
+export type TradeInput = Omit<Trade, "id" | "createdAt">;
+
+/**
+ * localStorageキー `invest_koro_state_v1` に保存する値の形。
+ * `trades` は増分3で追加した加算的フィールド(schema_versionは1のまま)。
+ * 旧データ(trades欠損)は空配列として扱う(src/lib/storage.ts loadState)。
+ */
 export interface AppStateV1 {
   schema_version: 1;
   tickers: Ticker[];
+  trades?: Trade[];
 }
 
 export const STORAGE_KEY = "invest_koro_state_v1";

@@ -94,3 +94,52 @@ GitHub Pagesは同一アカウントの全アプリが同一オリジン(`kojit1
 **投資航路側のURL構築方針**
 - 深掘りリンクは本番のGitHub Pages URLを直書きする(`src/lib/external.ts` `kessanNaviUrl` / `jukyuNaviUrl`): `https://kojit1229.github.io/stock_analyze/#/stock/<code>` と `https://kojit1229.github.io/stock_supply_demand/#/issue/<code>`。開発環境(`npm run dev`)では投資航路自体のoriginが異なるためリンク先は開けないが、本番相当のURLを常に指すことを優先した(投資航路がどこで動いていても旧アプリは常にGitHub Pages上にあるため)。
 - 両アプリともJP銘柄コードのみを扱う(USはそもそも対象外)。投資航路のticker ID(`<Market>:<Code>`)から`Market`が`JP`の場合のみ深掘りリンクを表示する。
+
+## (f) 増分3: 取引記録と建玉(ピラミッディング段階)
+
+第1弾で見送った建玉・取引記録を実装する。private repo同期はまだ範囲外(引き続き(c)節は設計のみ)。localStorageの `AppStateV1` に `trades?: Trade[]` を加算的に追加する(`schema_version` は 1 のまま。旧データは `trades` 欠損として空配列扱い、`src/lib/storage.ts` `loadState`)。
+
+**Trade契約**(`src/types.ts`)
+
+```ts
+interface Trade {
+  id: string;          // 一意
+  tickerId: string;    // 銘柄ID("<Market>:<Code>")
+  side: "buy" | "sell";
+  date: string;         // "YYYY-MM-DD"。new Date(文字列)禁止、input[type=date]の値をそのまま保持・表示
+  qty: number;
+  price: number;
+  stop?: number;        // この取引時点で宣言する損切りライン
+  reasonTags: ReasonTag[]; // プリセットから複数選択。自由入力はこの増分では持たない
+  memo?: string;
+  createdAt: string;
+}
+```
+
+理由タグのプリセット(`REASON_TAG_PRESETS`): 高値ブレイク / 買い増し(ピラミッディング) / 決算好調 / 損切り / 利確 / ルール外(裁量)。
+
+読み込みの寛容パースは行単位: 不正な`trade`要素は該当行だけを捨て、残りは生かす(`isValidTrade`)。
+
+**建玉導出ルール**(`src/lib/position.ts` `computePosition`。stateには保存せず、`Trade[]`から毎回純関数で計算する)
+
+- 対象銘柄のtradeを 日付→createdAt→id の順で安定ソートしてから順に処理する。
+- 保有数量 = 買い数量合計 − 売り数量合計。売り超過は0でクランプし、マイナス建玉を作らない。
+- 平均取得単価 = 買いの加重平均(平均単価法)。売りは数量のみ減らし、平均単価は変えない。保有数量が0になったら平均単価も0にリセットする(次の買いから新規に積み上げる)。保有数量0のとき`avgPrice`は`null`。
+- 段数(ピラミッディング段階) = 買いtradeを古い順に1始まりで並べたもの(`stages`。日付・数量・単価を表示)。
+- 現在の損切りライン(`currentStop`) = `stop`が宣言された最新のtrade(買い・売り問わず)の値。一度も宣言されていなければ`null`。
+- 損切り到達時損失額(`stopLossAmount`) = `(平均取得単価 − currentStop) × 保有数量`。保有数量0または`currentStop`未宣言なら`null`。
+
+**状態自動遷移**(`src/app.tsx` `handleAddTrade`)
+
+- 買いを記録し、記録後の保有数量が0より大きくなった場合: `ticker.status` を `"holding"` にする。
+- 売りを記録し、記録後の保有数量が0になった場合: `ticker.status` を `"sold"` にする。
+- いずれも`updatedAt`を更新する。上記条件に当てはまらない記録(状態が変わらない買い増し・部分売却等)では状態を変更しない。
+
+**取引記録の削除**: `TickerDetail`の各履歴行に削除ボタンを持つ(`window.confirm`で確認)。削除は`trades`配列から該当idを除くだけで、`ticker.status`は自動では戻さない(編集・状態の自動巻き戻しはこの増分のスコープ外)。建玉は削除後の`trades`から毎回再計算されるため、表示は自動的に整合する。
+
+**UI**(`src/components/TickerDetail.tsx` / `TradeForm.tsx`)
+
+- カルテ画面に建玉セクション(保有数量・平均単価・段数テーブル・損切りライン・到達時損失額。保有なしは「建玉なし」)と、「買いを記録」「売りを記録」ボタンを追加。ボタン押下で`TradeForm`(日付=今日デフォルト・数量・単価・stop任意・理由タグ複数選択)を開き、「記録する」で確定する。
+- 取引履歴一覧は新しい順(日付desc、同日はcreatedAt desc)。
+- 「今日」画面(`TodayQueue`)は`holding`グループの各行のうち建玉があるものだけ、保有数量・平均単価を1行サブ表示する(`TickerRow`の`position`prop)。
+- 金額表示は`src/lib/format.ts` `formatMoney`で通貨記号付き・整数丸めにする(丸めは表示直前のみ。内部計算は`number`のまま)。

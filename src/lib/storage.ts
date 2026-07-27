@@ -1,10 +1,10 @@
 // データアダプタ: localStorage v1。private repo同期は後続増分(docs/design.md (c) 参照)。
 // 方針: 壊れたデータでもアプリを落とさない(寛容パース)。書き込みは常に正規スキーマで行う。
 
-import { AppStateV1, STORAGE_KEY, Ticker, TickerStatus, TICKER_STATUSES } from "../types";
+import { AppStateV1, STORAGE_KEY, Ticker, TickerStatus, TICKER_STATUSES, Trade } from "../types";
 
 function emptyState(): AppStateV1 {
-  return { schema_version: 1, tickers: [] };
+  return { schema_version: 1, tickers: [], trades: [] };
 }
 
 function isValidTicker(v: unknown): v is Ticker {
@@ -22,6 +22,32 @@ function isValidTicker(v: unknown): v is Ticker {
   );
 }
 
+/**
+ * 取引記録の寛容パース(増分3)。不正な行は該当tradeだけを捨て、残りは生かす。
+ * reasonTagsはプリセット外の文字列が混ざっていても(将来のプリセット変更に備え)配列の形だけ検証する。
+ */
+function isValidTrade(v: unknown): v is Trade {
+  if (typeof v !== "object" || v === null) return false;
+  const t = v as Record<string, unknown>;
+  return (
+    typeof t.id === "string" &&
+    typeof t.tickerId === "string" &&
+    (t.side === "buy" || t.side === "sell") &&
+    typeof t.date === "string" &&
+    typeof t.qty === "number" &&
+    Number.isFinite(t.qty) &&
+    t.qty > 0 &&
+    typeof t.price === "number" &&
+    Number.isFinite(t.price) &&
+    t.price >= 0 &&
+    (t.stop === undefined || (typeof t.stop === "number" && Number.isFinite(t.stop))) &&
+    Array.isArray(t.reasonTags) &&
+    t.reasonTags.every((tag) => typeof tag === "string") &&
+    (t.memo === undefined || typeof t.memo === "string") &&
+    typeof t.createdAt === "string"
+  );
+}
+
 /** localStorageから状態を読む。破損・欠損・未知schema_versionは空状態にフォールバックする(例外を投げない)。 */
 export function loadState(): AppStateV1 {
   try {
@@ -33,7 +59,9 @@ export function loadState(): AppStateV1 {
     // schema_versionが1以外(未知バージョン・欠損)は破損扱いとしてフォールバックする。
     if (obj.schema_version !== 1) return emptyState();
     const tickers = Array.isArray(obj.tickers) ? obj.tickers.filter(isValidTicker) : [];
-    return { schema_version: 1, tickers };
+    // tradesは増分3で追加した加算的フィールド。欠損(旧データ)は空配列として扱う。
+    const trades = Array.isArray(obj.trades) ? obj.trades.filter(isValidTrade) : [];
+    return { schema_version: 1, tickers, trades };
   } catch {
     // 壊れたJSON等。既存データは触らず、アプリは空状態から動作を継続する。
     return emptyState();
