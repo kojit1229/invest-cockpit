@@ -765,3 +765,117 @@ body {
   background: #eee;
   color: #333;
 }
+
+/* 増分5: 今日の判断キュー・カルテの株価情報 */
+
+.judgment-queue {
+  margin-bottom: 20px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  background: white;
+}
+
+.judgment-queue h2 {
+  font-size: 1rem;
+  margin: 0 0 10px;
+}
+
+.judgment-queue__list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.judgment-queue__item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.judgment-queue__link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.judgment-queue__link:hover .judgment-queue__name {
+  text-decoration: underline;
+}
+
+.judgment-queue__badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-radius: 4px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.judgment-queue__badge--stop {
+  background: #fbe4e4;
+  color: #a3241f;
+}
+
+.judgment-queue__badge--earnings {
+  background: #e6f0fb;
+  color: #1a5fb4;
+}
+
+.judgment-queue__badge--high {
+  background: #e3f2e6;
+  color: #1b6b30;
+}
+
+.judgment-queue__name {
+  font-weight: 600;
+}
+
+.judgment-queue__detail {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: #444;
+}
+
+.judgment-queue__date {
+  margin: 2px 0 0;
+  font-size: 0.75rem;
+  color: #888;
+}
+
+.judgment-queue__sources {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #888;
+}
+
+.ticker-detail__price {
+  margin-top: 20px;
+  border-top: 2px solid var(--border);
+  padding-top: 16px;
+}
+
+.ticker-detail__price h2 {
+  font-size: 1rem;
+  margin: 0 0 8px;
+}
+
+.price-info {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.price-info dt {
+  color: #666;
+}
+
+.price-info dd {
+  margin: 0;
+}
