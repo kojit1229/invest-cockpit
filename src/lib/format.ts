@@ -15,6 +15,11 @@ const DECIMALS_BY_CURRENCY: Record<Currency, number> = {
   USD: 2,
 };
 
+/** 通貨記号のみを返す(増分7: ポジションサイズ計算機の入力欄ラベルで使う)。 */
+export function currencySymbol(currency: Currency): string {
+  return SYMBOL_BY_CURRENCY[currency];
+}
+
 /** 金額を通貨記号付き・通貨別の桁数(JPY=0桁/USD=2桁)で丸めた表示文字列にする。 */
 export function formatMoney(amount: number, currency: Currency): string {
   const decimals = DECIMALS_BY_CURRENCY[currency];

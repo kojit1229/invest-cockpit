@@ -217,3 +217,30 @@ interface Trade {
 - `TickerDetail`にも株価セクション(JP銘柄のみ)を追加: 最新株価・3年高値(週足終値)からの距離(または「高値更新中」)・保有時はstopまでの距離(%)。対象226銘柄に無い(またはJPでない)銘柄は「価格データなし(対象226銘柄外)」。
 
 **未実装・既知の制約**: US銘柄はそもそも価格・決算データソースの対象外(需給ナビ・決算ナビともJP専用のため、判断キュー・カルテ株価セクションともにJPのみ)。イベント判定は`candidate`/`watching`/`holding`限定(`sold`/`passed`はカルテの株価セクション自体は引き続き表示するが、判断キューには出ない)。
+
+## (i) 増分7: ポジションサイズ計算機・見送りワンタップ
+
+`AppStateV1`に`settings?: AppSettings`(`src/types.ts`)を加算的に追加する。`schema_version`は1のまま。旧データ(欠損)は`undefined`として扱い、`TradeForm`は許容損失額の空欄から始める(`src/lib/storage.ts` `isValidSettings`が数値以外の値を持つフィールドをundefinedへ寛容フォールバックする)。`Ticker`にも`passedEvents?: PassedEvent[]`を加算的に追加する(旧データは空配列扱い、`src/lib/storage.ts` `isValidPassedEvent`が行単位の寛容パースを行う)。
+
+**ポジションサイズ計算機**(`src/lib/positionSize.ts` `recommendPositionSize`、純関数)
+
+- 契約: 推奨株数 = `floor(許容損失額 ÷ (エントリー価格 − stop))`。JP銘柄は単元株(100株)単位に切り下げ、US銘柄は1株単位(`market`パラメータで判定)。
+- エントリー価格がstop以下の場合は`null`を返す。呼び出し側(`TradeForm`)はこれを「stopはエントリーより下に」というエラー表示に変換する。
+- `maxLoss`(丸め後の実際の最大損失額 = `qty * (entryPrice - stop)`)も合わせて返す。
+
+**UI統合**(`src/components/TradeForm.tsx`、買い側のみ)
+
+- 単価・stopの入力欄の直後に許容損失額入力欄(`currencySymbol`で通貨記号のみ表示、`src/lib/format.ts`)を追加する。既定値は設定画面(`#/settings`)の`AppSettings.defaultRiskJPY`/`defaultRiskUSD`(銘柄の通貨に応じてどちらかを`TickerDetail`が選んで渡す)。
+- 単価・stop・許容損失額がすべて入力されると「推奨株数: N株(この取引の最大損失 ¥X)」を自動表示し、「この株数を使う」ボタンで数量欄へ反映する。単価・stopが入力済みでエントリー<=stopの場合はエラー文言のみ表示する(許容損失額の入力有無に関わらず表示する)。
+- 買い増し時(既存建玉あり、`computePosition(trades, tickerId).qty > 0`)は、フォームに入力中のstopを使って「現在の建玉全体でstopに到達した場合の合計損失」も併記する。実装は`qty: 0, price: 0`で当該stopだけを宣言する仮想tradeを既存tradeの末尾に足して`computePosition`へ通す方式(`stopLossAmount`が既存の保有数量・平均取得単価に対して新stopを適用した値になる。今回追加する数量は含めない)。
+
+**設定画面**(`src/components/SettingsPage.tsx`)
+
+- 「ポジションサイズ計算機の既定」セクションを追加し、`defaultRiskJPY`/`defaultRiskUSD`をそれぞれ数値入力・保存する。0以下・非数・空欄は`undefined`に落とす(`App.tsx` `handleSettingsChange`が`state.settings`を丸ごと置き換える。フィールド単位のマージはしない)。
+
+**見送りワンタップ**(`src/types.ts` `PassReasonTag`/`PassedEvent`、`src/app.tsx` `handleOpenPass`/`handleConfirmPass`)
+
+- 理由タグプリセット(`PASS_REASON_TAG_PRESETS`、複数選択可、自由入力なし): 高値まで遠い / 出来高・流動性不足 / 決算またぎ回避 / 地合い悪い / ルール外 / その他。
+- 導線は2箇所から同じダイアログ(`src/components/PassDialog.tsx`)を開く: (a) カルテ画面(`TickerDetail`)の状態セレクタ横「見送る」ボタン、(b) 今日の判断キュー(`TodayQueue`の`JudgmentQueue`)の各イベントカードの「見送る」ボタン。どちらも`onOpenPass(tickerId)`(`App.tsx`の状態`passTarget`)を呼び、ダイアログはタグを1つ以上選ばないと確定できない(学習ループの入力データになるため空タグを許さない)。
+- 確定(`handleConfirmPass`)で対象銘柄の`status`を`"passed"`にし、`passedEvents`へ`{ date: todayStr(), tags }`を追記する。append-onlyで上限20件、超過分は古いものから削除する(`MAX_PASSED_EVENTS`)。記録経路はこのワンタップのみに限定する(他の経路から`passedEvents`を書き換えない)。
+- カルテ画面に見送り履歴セクションを表示する(日付+タグ、`passedEvents`を反転した配列=最新順)。0件は「見送り記録はありません」。

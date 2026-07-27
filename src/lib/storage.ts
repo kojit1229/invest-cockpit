@@ -1,10 +1,24 @@
 // データアダプタ: localStorage v1。private repo同期は後続増分(docs/design.md (c) 参照)。
 // 方針: 壊れたデータでもアプリを落とさない(寛容パース)。書き込みは常に正規スキーマで行う。
 
-import { AppStateV1, STORAGE_KEY, Ticker, TickerStatus, TICKER_STATUSES, Trade } from "../types";
+import { AppSettings, AppStateV1, STORAGE_KEY, Ticker, TickerStatus, TICKER_STATUSES, Trade } from "../types";
 
 function emptyState(): AppStateV1 {
   return { schema_version: 1, tickers: [], trades: [], lastModified: "" };
+}
+
+/**
+ * 見送り履歴1件の寛容パース(増分7)。`tags`はプリセット外の文字列が混ざっていても
+ * (将来のプリセット変更に備え)配列の形だけ検証する(isValidTradeのreasonTagsと同じ方針)。
+ */
+function isValidPassedEvent(v: unknown): v is { date: string; tags: string[] } {
+  if (typeof v !== "object" || v === null) return false;
+  const e = v as Record<string, unknown>;
+  return (
+    typeof e.date === "string" &&
+    Array.isArray(e.tags) &&
+    e.tags.every((tag) => typeof tag === "string")
+  );
 }
 
 function isValidTicker(v: unknown): v is Ticker {
@@ -18,7 +32,21 @@ function isValidTicker(v: unknown): v is Ticker {
     TICKER_STATUSES.includes(t.status as TickerStatus) &&
     typeof t.createdAt === "string" &&
     typeof t.updatedAt === "string" &&
-    (t.importedFrom === undefined || typeof t.importedFrom === "string")
+    (t.importedFrom === undefined || typeof t.importedFrom === "string") &&
+    (t.passedEvents === undefined ||
+      (Array.isArray(t.passedEvents) && t.passedEvents.every(isValidPassedEvent)))
+  );
+}
+
+/** `settings`の寛容パース(増分7)。数値以外の値が混ざっていれば当該フィールドはundefinedに落とす。 */
+function isValidSettings(v: unknown): v is AppSettings {
+  if (typeof v !== "object" || v === null) return false;
+  const s = v as Record<string, unknown>;
+  return (
+    (s.defaultRiskJPY === undefined ||
+      (typeof s.defaultRiskJPY === "number" && Number.isFinite(s.defaultRiskJPY))) &&
+    (s.defaultRiskUSD === undefined ||
+      (typeof s.defaultRiskUSD === "number" && Number.isFinite(s.defaultRiskUSD)))
   );
 }
 
@@ -99,7 +127,10 @@ export function parseAppState(
     }
     // lastModifiedは増分4で追加した加算的フィールド。欠損(旧データ)は""として扱う。
     const lastModified = typeof obj.lastModified === "string" ? obj.lastModified : "";
-    return { schema_version: 1, tickers, trades, lastModified };
+    // settingsは増分7で追加した加算的フィールド。不正な形(型不一致)は丸ごと破棄してundefinedに
+    // フォールバックする(欠損=旧データと同じ扱い)。
+    const settings = isValidSettings(obj.settings) ? obj.settings : undefined;
+    return { schema_version: 1, tickers, trades, lastModified, settings };
   } catch {
     return null;
   }
