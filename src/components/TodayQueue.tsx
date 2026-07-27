@@ -1,16 +1,19 @@
-import { STATUS_LABEL_JA, Ticker, TICKER_STATUSES, TickerStatus } from "../types";
+import { STATUS_LABEL_JA, Ticker, TICKER_STATUSES, TickerStatus, Trade } from "../types";
 import { TickerRow } from "./TickerRow";
+import { computePosition } from "../lib/position";
 
 interface Props {
   tickers: Ticker[];
+  trades: Trade[];
   onStatusChange: (id: string, status: TickerStatus) => void;
 }
 
 /**
  * 「今日」画面: 銘柄を状態別にグループ表示する。
  * 第1弾は判断キューの絞り込み(変化検知)を持たず、状態別の一覧が最小動作版となる。
+ * 増分3: 保有(holding)グループの各行に、建玉があるものだけ保有数量・平均単価を1行サブ表示する。
  */
-export function TodayQueue({ tickers, onStatusChange }: Props) {
+export function TodayQueue({ tickers, trades, onStatusChange }: Props) {
   if (tickers.length === 0) {
     return (
       <section class="today-queue">
@@ -36,7 +39,12 @@ export function TodayQueue({ tickers, onStatusChange }: Props) {
             ) : (
               <ul class="ticker-list">
                 {group.map((t) => (
-                  <TickerRow ticker={t} onStatusChange={onStatusChange} key={t.id} />
+                  <TickerRow
+                    ticker={t}
+                    position={status === "holding" ? computePosition(trades, t.id) : undefined}
+                    onStatusChange={onStatusChange}
+                    key={t.id}
+                  />
                 ))}
               </ul>
             )}

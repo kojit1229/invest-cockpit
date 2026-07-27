@@ -1,9 +1,16 @@
-import { STATUS_LABEL_JA, Ticker, TICKER_STATUSES, TickerStatus } from "../types";
+import { useState } from "preact/hooks";
+import { STATUS_LABEL_JA, Ticker, TICKER_STATUSES, TickerStatus, Trade, TradeInput, TradeSide } from "../types";
 import { kessanNaviUrl, jukyuNaviUrl } from "../lib/external";
+import { computePosition } from "../lib/position";
+import { formatMoney } from "../lib/format";
+import { TradeForm } from "./TradeForm";
 
 interface Props {
   ticker: Ticker | undefined;
+  trades: Trade[];
   onStatusChange: (id: string, status: TickerStatus) => void;
+  onAddTrade: (input: TradeInput) => void;
+  onDeleteTrade: (tradeId: string) => void;
 }
 
 /** 銘柄IDを市場プレフィックスとコードに分ける。"JP:7203" -> ["JP", "7203"] */
@@ -13,8 +20,18 @@ function splitId(id: string): [string, string] {
   return [id.slice(0, idx), id.slice(idx + 1)];
 }
 
-/** 銘柄カルテ画面(`#/ticker/<id>`)。銘柄の詳細と、旧アプリへの深掘りリンクを表示する。 */
-export function TickerDetail({ ticker, onStatusChange }: Props) {
+/** 取引履歴を新しい順(日付desc、同日はcreatedAt desc)に並べる。 */
+function sortHistoryDesc(trades: Trade[]): Trade[] {
+  return [...trades].sort((a, b) => {
+    if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+    return a.createdAt < b.createdAt ? 1 : -1;
+  });
+}
+
+/** 銘柄カルテ画面(`#/ticker/<id>`)。銘柄の詳細、建玉、取引記録・履歴、旧アプリへの深掘りリンクを表示する。 */
+export function TickerDetail({ ticker, trades, onStatusChange, onAddTrade, onDeleteTrade }: Props) {
+  const [draftSide, setDraftSide] = useState<TradeSide | null>(null);
+
   if (!ticker) {
     return (
       <section class="ticker-detail">
@@ -27,6 +44,9 @@ export function TickerDetail({ ticker, onStatusChange }: Props) {
   }
 
   const [market, code] = splitId(ticker.id);
+  const tickerTrades = trades.filter((t) => t.tickerId === ticker.id);
+  const position = computePosition(tickerTrades, ticker.id);
+  const history = sortHistoryDesc(tickerTrades);
 
   return (
     <section class="ticker-detail">
@@ -63,6 +83,111 @@ export function TickerDetail({ ticker, onStatusChange }: Props) {
           ))}
         </select>
       </label>
+      <div class="ticker-detail__position">
+        <h2>建玉</h2>
+        {position.qty === 0 ? (
+          <p class="empty-state empty-state--small">建玉なし</p>
+        ) : (
+          <>
+            <dl class="position-summary">
+              <dt>保有数量</dt>
+              <dd>{position.qty.toLocaleString()}</dd>
+              <dt>平均取得単価</dt>
+              <dd>{formatMoney(position.avgPrice ?? 0, ticker.currency)}</dd>
+              <dt>損切りライン</dt>
+              <dd>
+                {position.currentStop !== null
+                  ? formatMoney(position.currentStop, ticker.currency)
+                  : "未宣言"}
+              </dd>
+              {position.stopLossAmount !== null && (
+                <>
+                  <dt>損切り到達時損失額</dt>
+                  <dd>{formatMoney(position.stopLossAmount, ticker.currency)}</dd>
+                </>
+              )}
+            </dl>
+            <table class="position-stages">
+              <thead>
+                <tr>
+                  <th>段</th>
+                  <th>日付</th>
+                  <th>数量</th>
+                  <th>単価</th>
+                </tr>
+              </thead>
+              <tbody>
+                {position.stages.map((s) => (
+                  <tr key={s.trade.id}>
+                    <td>{s.stage}</td>
+                    <td>{s.trade.date}</td>
+                    <td>{s.trade.qty.toLocaleString()}</td>
+                    <td>{formatMoney(s.trade.price, ticker.currency)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+        <div class="ticker-detail__trade-buttons">
+          <button type="button" onClick={() => setDraftSide("buy")}>
+            買いを記録
+          </button>
+          <button type="button" onClick={() => setDraftSide("sell")}>
+            売りを記録
+          </button>
+        </div>
+        {draftSide && (
+          <TradeForm
+            tickerId={ticker.id}
+            side={draftSide}
+            onSubmit={(input) => {
+              onAddTrade(input);
+              setDraftSide(null);
+            }}
+            onCancel={() => setDraftSide(null)}
+          />
+        )}
+      </div>
+      <div class="ticker-detail__history">
+        <h2>取引履歴</h2>
+        {history.length === 0 ? (
+          <p class="empty-state empty-state--small">取引記録はありません</p>
+        ) : (
+          <ul class="trade-history">
+            {history.map((t) => (
+              <li class="trade-history__item" key={t.id}>
+                <div class="trade-history__main">
+                  <span class={`trade-history__side trade-history__side--${t.side}`}>
+                    {t.side === "buy" ? "買い" : "売り"}
+                  </span>
+                  <span class="trade-history__date">{t.date}</span>
+                  <span class="trade-history__qty">{t.qty.toLocaleString()}</span>
+                  <span class="trade-history__price">{formatMoney(t.price, ticker.currency)}</span>
+                </div>
+                {t.stop !== undefined && (
+                  <div class="trade-history__stop">
+                    損切り宣言: {formatMoney(t.stop, ticker.currency)}
+                  </div>
+                )}
+                {t.reasonTags.length > 0 && (
+                  <div class="trade-history__tags">{t.reasonTags.join(" / ")}</div>
+                )}
+                {t.memo && <div class="trade-history__memo">{t.memo}</div>}
+                <button
+                  type="button"
+                  class="trade-history__delete"
+                  onClick={() => {
+                    if (window.confirm("この取引記録を削除しますか?")) onDeleteTrade(t.id);
+                  }}
+                >
+                  削除
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
       <div class="ticker-detail__links">
         <h2>深掘りリンク</h2>
         {market === "JP" ? (

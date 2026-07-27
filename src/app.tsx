@@ -1,13 +1,22 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import { AppStateV1, Market, Ticker, TickerStatus, CURRENCY_BY_MARKET } from "./types";
+import { AppStateV1, Market, Ticker, TickerStatus, CURRENCY_BY_MARKET, Trade, TradeInput } from "./types";
 import { loadState, saveState } from "./lib/storage";
 import { nowStr } from "./lib/date";
 import { useHashRoute } from "./lib/router";
 import { ImportCandidate } from "./lib/external";
+import { computePosition } from "./lib/position";
 import { TodayQueue } from "./components/TodayQueue";
 import { AddTickerForm } from "./components/AddTickerForm";
 import { TickerDetail } from "./components/TickerDetail";
 import { ImportPage } from "./components/ImportPage";
+
+/** 取引IDの採番。crypto.randomUUID未対応環境(古いiOS Safari等)向けにフォールバックを持つ。 */
+function genTradeId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `trade-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 export function App() {
   const [state, setState] = useState<AppStateV1>(() => loadState());
@@ -79,6 +88,32 @@ export function App() {
     return { imported: additions.length, skipped };
   }
 
+  // 取引記録(増分3): 追加時に建玉を再計算し、買いで保有>0になれば holding、
+  // 売りで保有が0になれば sold へ自動遷移する(docs/design.md 増分3節)。
+  function handleAddTrade(input: TradeInput) {
+    const trade: Trade = { ...input, id: genTradeId(), createdAt: nowStr() };
+    setState((prev) => {
+      const trades = [...(prev.trades ?? []), trade];
+      const position = computePosition(trades, input.tickerId);
+      const tickers = prev.tickers.map((t) => {
+        if (t.id !== input.tickerId) return t;
+        let status = t.status;
+        if (input.side === "buy" && position.qty > 0) status = "holding";
+        if (input.side === "sell" && position.qty === 0) status = "sold";
+        if (status === t.status) return t;
+        return { ...t, status, updatedAt: nowStr() };
+      });
+      return { ...prev, trades, tickers };
+    });
+  }
+
+  function handleDeleteTrade(tradeId: string) {
+    setState((prev) => ({
+      ...prev,
+      trades: (prev.trades ?? []).filter((t) => t.id !== tradeId),
+    }));
+  }
+
   return (
     <div class="app">
       <header class="app__header">
@@ -88,7 +123,11 @@ export function App() {
       <main>
         {route.name === "today" && (
           <>
-            <TodayQueue tickers={state.tickers} onStatusChange={handleStatusChange} />
+            <TodayQueue
+              tickers={state.tickers}
+              trades={state.trades ?? []}
+              onStatusChange={handleStatusChange}
+            />
             <AddTickerForm onAdd={handleAdd} />
             <a class="import-link" href="#/import">
               旧アプリのウォッチリストをインポート
@@ -98,7 +137,10 @@ export function App() {
         {route.name === "ticker" && (
           <TickerDetail
             ticker={state.tickers.find((t) => t.id === route.id)}
+            trades={state.trades ?? []}
             onStatusChange={handleStatusChange}
+            onAddTrade={handleAddTrade}
+            onDeleteTrade={handleDeleteTrade}
           />
         )}
         {route.name === "import" && (
