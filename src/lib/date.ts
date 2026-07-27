@@ -22,3 +22,21 @@ export function formatDateParts(year: number, month: number, day: number): strin
   const dd = String(day).padStart(2, "0");
   return `${year}-${mm}-${dd}`;
 }
+
+/** "YYYY-MM-DD"を年/月/日の数値に分解する(new Date(文字列)によるパースを避けるため)。 */
+function parseYmd(dateStr: string): [number, number, number] {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return [y, m, d];
+}
+
+/**
+ * 2つの"YYYY-MM-DD"文字列の日数差(b - a)を返す。bがaより未来なら正、過去なら負。
+ * 文字列をそのままDateへ渡さず、年/月/日に数値分解してからDate.UTCで構築する
+ * (iOS Safari対策。増分5: 決算接近・鮮度判定で使う)。
+ */
+export function daysBetween(a: string, b: string): number {
+  const [ay, am, ad] = parseYmd(a);
+  const [by, bm, bd] = parseYmd(b);
+  const msPerDay = 24 * 60 * 60 * 1000;
+  return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / msPerDay);
+}

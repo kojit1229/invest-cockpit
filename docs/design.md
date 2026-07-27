@@ -176,3 +176,35 @@ interface Trade {
 **ヘッダー同期インジケータ(`src/components/SyncIndicator.tsx`)**: `unset`(未設定・グレー)/ `idle`(未同期・グレー)/ `syncing`(送信中)/ `synced`(同期済・緑)/ `error`(エラー・赤+短文)の5状態。エラー時もアプリのローカル機能(追加・状態変更・取引記録等)はすべて生き続ける(決定論のローカル保存が正規経路であり、同期はその上に乗る付加機能という位置づけ)。
 
 **未実装・既知の制約**: (c)節の日次inboxパターン(`invest-cockpit/inbox/YYYY-MM-DD.json`)は引き続き未実装。競合解決の再帰リトライ(sha不一致の再発)は最大2回まで(`MAX_RECONCILE_ATTEMPTS`)。
+
+## (h) 増分5(第1弾最終): 今日の判断キュー(決定論イベント)
+
+既存パイプライン(決算ナビ・需給ナビ)の公開JSONをクライアント側で読み、決定論イベントを毎回計算して「今日の判断キュー」として今日画面(`TodayQueue`)の先頭に表示する。**保存はしない**(ロードのたびに再計算)。実装は`src/lib/pipeline.ts`(fetch+スキーマ検証+正規化)と`src/lib/events.ts`(イベント判定の純関数)。
+
+**外部JSONの契約(この増分の実装時点、2026-07-27に実ファイルを読んで確認した事実)**
+
+決算ナビ(`repos/stock_analyze/frontend/data/`。GitHub Pagesではfrontendがサイトルート):
+- `schedule.json`: 配列。要素は`{ code: string, date: "YYYY-MM-DD", fiscal_type: string }`(決算発表予定日一覧)。
+- `meta.json`: `{ generated_at: "YYYY-MM-DDTHH:mm:ss", sources: {...}, counts: {...} }`。データ日付は`generated_at`の先頭10文字を文字列切り出しして使う(`new Date()`へは渡さない)。
+- 本番URL: `/stock_analyze/data/schedule.json` / `/stock_analyze/data/meta.json`(ルート相対。開発環境では404が正常)。
+
+需給ナビ(`repos/stock_supply_demand`。生成データは`gh-pages`ブランチのみに存在し、mainブランチには無い。設計原則「mainに生成データを置かない」による):
+- `data/prices/{code}.json`: `{ schema_version: 1, code: string, weekly: { dates: string[], close: (number|null)[] }, daily: { dates: string[], close: (number|null)[] } }`(週次は3年分・約158点、日次は直近30点。`collector/prices.py`のfile contract)。対象は`config/price_list.json`記載の約226銘柄(日経225+K注目銘柄)のみ。
+- `data/prices_meta.json`: `{ schema_version: 1, latest_price_date: "YYYY-MM-DD", generated_at: string, price_count: number }`。データ日付は`latest_price_date`をそのまま使う。
+- 本番URL: `/stock_supply_demand/data/prices_meta.json` / `/stock_supply_demand/data/prices/{code}.json`(ルート相対。開発環境では404が正常)。
+
+**fetchの失敗隔離**(`src/lib/pipeline.ts` `loadPipelineData`): 決算ナビ・需給ナビは別々に`fetchJson`(例外を投げずnullを返す)でfetchし、`Promise.all`で並行取得する。一方が失敗してももう一方の判定は生きる。需給ナビは銘柄ごとに`data/prices/{code}.json`を個別fetchするため、1銘柄の404が他銘柄の取得を妨げない。`prices_meta.json`が読めない場合は需給ナビ全体を取得失敗扱いにする(鮮度表示の基準がないため)。
+
+**イベント種別**(`src/lib/events.ts`。対象は状態が`candidate`/`watching`/`holding`のJP銘柄のみ。`sold`/`passed`は判断が済んだ銘柄として対象外とした、この増分の実装判断):
+- 決算接近(`detectEarningsEvents`): 決算発表予定日が今日から7日以内(当日含む、`daysBetween`が0〜7)。
+- 高値接近/更新(`detectHighEvents`。対象は候補/監視/保有すべて): 「最新値」(日次closeの末尾有効値、無ければ週次closeの末尾有効値)が週次3年高値(weekly.closeの最大値)の95%以上で「高値接近」、100%を超えたら「高値更新」。
+- 損切り接近(`detectStopEvents`。対象は`holding`のみ): 建玉(`computePosition`)の`currentStop`に対し、最新値がstopの103%以下で「損切りライン接近」、stop未満で「損切りライン割れ」。
+- `buildJudgmentQueue`が3種を統合し、損切り→決算→高値→銘柄名の順で安定ソートする。
+
+**日付比較**: `src/lib/date.ts` `daysBetween(a, b)`を追加(2つの"YYYY-MM-DD"を年/月/日に数値分解し`Date.UTC`で構築してから差分日数を返す。文字列をそのまま`new Date()`へは渡さない)。決算7日判定・鮮度警告(7日超で「古いデータ」)の両方で使う。
+
+**UI**:
+- `TodayQueue`の先頭に`JudgmentQueue`セクション。イベント0件なら「今日judgmentが必要な変化はありません」。各カードは種別バッジ・銘柄名・根拠数値・データ日付・カルテへのリンク。下部に「出典: 決算ナビ(YYYY-MM-DD) / 需給ナビ(YYYY-MM-DD)」(取得中は「取得中…」、fetch失敗は「取得不可(ローカル機能は正常)」、7日超は「(古いデータ)」を付記)。
+- `TickerDetail`にも株価セクション(JP銘柄のみ)を追加: 最新株価・3年高値からの距離(または「高値更新中」)・保有時はstopまでの距離(%)。対象226銘柄に無い(またはJPでない)銘柄は「価格データなし(対象226銘柄外)」。
+
+**未実装・既知の制約**: US銘柄はそもそも価格・決算データソースの対象外(需給ナビ・決算ナビともJP専用のため、判断キュー・カルテ株価セクションともにJPのみ)。イベント判定は`candidate`/`watching`/`holding`限定(`sold`/`passed`はカルテの株価セクション自体は引き続き表示するが、判断キューには出ない)。
