@@ -29,9 +29,16 @@ body {
 }
 
 .app__tagline {
-  margin: 4px 0 20px;
+  margin: 4px 0 4px;
   color: #666;
   font-size: 0.9rem;
+}
+
+.app__review-link {
+  display: inline-block;
+  margin: 0 0 20px;
+  font-size: 0.85rem;
+  color: var(--accent);
 }
 
 .today-queue__group {
@@ -1174,4 +1181,93 @@ body {
   font-size: 0.75rem;
   color: #b03a2e;
   text-align: center;
+}
+
+/* 増分9: 週次レビュー画面 */
+
+.review-page h1 {
+  margin: 4px 0 16px;
+}
+
+.review-page__summaries {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.review-summary-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.review-summary-card h3 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+
+.review-summary-card__stats {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.review-summary-card__stats dt {
+  color: #666;
+}
+
+.review-summary-card__stats dd {
+  margin: 0;
+}
+
+.review-summary-card__note {
+  display: block;
+  color: #888;
+  font-size: 0.75rem;
+}
+
+.review-page__section {
+  margin-top: 24px;
+  border-top: 2px solid var(--border);
+  padding-top: 16px;
+}
+
+.review-page__section h2 {
+  font-size: 1rem;
+  margin: 0 0 8px;
+}
+
+.review-pyramid__list,
+.review-pass-tags {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.review-round-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.review-round-table th,
+.review-round-table td {
+  text-align: left;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.review-round-table__pnl--win {
+  color: #1b6b30;
+}
+
+.review-round-table__pnl--loss {
+  color: #a3241f;
 }
