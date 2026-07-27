@@ -32,8 +32,8 @@ export interface PipelineData {
 
 // 本番はGitHub Pages同一オリジン(kojit1229.github.io)で解決されるルート相対パス。
 // devでは404になるが正常(呼び出し側がフォールバック表示する。docs/design.md 増分5節)。
-const KESSAN_SCHEDULE_URL = "/stock_analyze/data/schedule.json";
-const KESSAN_META_URL = "/stock_analyze/data/meta.json";
+const KESSAN_SCHEDULE_URL = "/stock_analyze/frontend/data/schedule.json";
+const KESSAN_META_URL = "/stock_analyze/frontend/data/meta.json";
 const JUKYU_PRICES_META_URL = "/stock_supply_demand/data/prices_meta.json";
 
 function jukyuPriceUrl(code: string): string {
