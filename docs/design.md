@@ -186,7 +186,7 @@ interface Trade {
 決算ナビ(`repos/stock_analyze/frontend/data/`。GitHub Pagesではfrontendがサイトルート):
 - `schedule.json`: 配列。要素は`{ code: string, date: "YYYY-MM-DD", fiscal_type: string }`(決算発表予定日一覧)。
 - `meta.json`: `{ generated_at: "YYYY-MM-DDTHH:mm:ss", sources: {...}, counts: {...} }`。データ日付は`generated_at`の先頭10文字を文字列切り出しして使う(`new Date()`へは渡さない)。
-- 本番URL: `/stock_analyze/data/schedule.json` / `/stock_analyze/data/meta.json`(ルート相対。開発環境では404が正常)。
+- 本番URL: `/stock_analyze/frontend/data/schedule.json` / `/stock_analyze/frontend/data/meta.json`(ルート相対。開発環境では404が正常)。
 
 需給ナビ(`repos/stock_supply_demand`。生成データは`gh-pages`ブランチのみに存在し、mainブランチには無い。設計原則「mainに生成データを置かない」による):
 - `data/prices/{code}.json`: `{ schema_version: 1, code: string, weekly: { dates: string[], close: (number|null)[] }, daily: { dates: string[], close: (number|null)[] } }`(週次は3年分・約158点、日次は直近30点。`collector/prices.py`のfile contract)。対象は`config/price_list.json`記載の約226銘柄(日経225+K注目銘柄)のみ。
