@@ -3,10 +3,10 @@
 
 import { Trade } from "../types";
 
-/** 買いtrade1件 = ピラミッディング段階1件。 */
+/** 買いtrade1件 = ピラミッディング段階1件。直近のフラット(建玉解消)以降のみを対象とする。 */
 export interface PositionStage {
   trade: Trade;
-  /** 1始まりの段数(古い買いから順)。 */
+  /** 1始まりの段数(直近フラット以降、古い買いから順)。 */
   stage: number;
 }
 
@@ -15,9 +15,9 @@ export interface Position {
   qty: number;
   /** 平均取得単価(買いの加重平均、売りは平均単価法で数量のみ減らす)。qty===0ならnull。 */
   avgPrice: number | null;
-  /** 買いtradeの一覧(古い順、段数付き)。 */
+  /** 買いtradeの一覧(直近のフラット以降、古い順、段数付き)。前ラウンド(過去にフラットになる前)の買いは含まない。 */
   stages: PositionStage[];
-  /** 最新のstop宣言。一度も宣言されていなければnull。 */
+  /** 直近のフラット以降のtradeで宣言された最新のstop。フラット以降に一度も宣言されていなければnull(前ラウンドのstopは持ち越さない)。 */
   currentStop: number | null;
   /** 損切り到達時の想定損失額 = (avgPrice - currentStop) * qty。qty===0またはcurrentStop未宣言ならnull。 */
   stopLossAmount: number | null;
@@ -32,13 +32,21 @@ function sortTrades(trades: Trade[]): Trade[] {
   });
 }
 
-/** 指定銘柄の建玉を、その銘柄のTrade一覧から導出する。tradesは全銘柄分を渡してよい(内部でtickerId絞り込みする)。 */
+/**
+ * 指定銘柄の建玉を、その銘柄のTrade一覧から導出する。tradesは全銘柄分を渡してよい(内部でtickerId絞り込みする)。
+ *
+ * ラウンド境界(reviewer重大4の修正): 保有数量が0になった時点(フラット=建玉解消)を新ラウンドの
+ * 開始点とし、`stages`・`currentStop`はそのフラット以降のtradeだけから導出する。フラットにした
+ * 売り自体がstopを宣言していても、そのstopは(建玉が無くなった時点のものなので)次ラウンドへ
+ * 持ち越さずnullにリセットする。`avgPrice`は元々qty===0で0にリセットされるため、新ラウンドの
+ * 買いから自然に正しい値が積み上がる(この点はフラット判定を待たずに従来から正しい)。
+ */
 export function computePosition(allTrades: Trade[], tickerId: string): Position {
   const trades = sortTrades(allTrades.filter((t) => t.tickerId === tickerId));
 
   let qty = 0;
   let avgPrice = 0; // qty>0の間だけ意味を持つ。qty===0では0にリセットする。
-  const stages: PositionStage[] = [];
+  let stages: PositionStage[] = [];
   let currentStop: number | null = null;
   let stageNo = 0;
 
@@ -52,7 +60,16 @@ export function computePosition(allTrades: Trade[], tickerId: string): Position 
     } else {
       // 売り超過(データ不整合や手動削除の結果ありうる)は0でクランプし、マイナス建玉を作らない。
       qty = Math.max(0, qty - t.qty);
-      if (qty === 0) avgPrice = 0;
+      if (qty === 0) {
+        avgPrice = 0;
+        // フラット到達: 新ラウンドの開始点として段数・stopをリセットする(前ラウンドの遺物を残さない)。
+        // このフラットを起こした売りが同時にstopを宣言していても、建玉が無くなった以上そのstopは
+        // 次ラウンドに引き継がない(continueで下のstop反映をスキップする)。
+        stages = [];
+        currentStop = null;
+        stageNo = 0;
+        continue;
+      }
     }
     if (t.stop !== undefined) {
       currentStop = t.stop;
