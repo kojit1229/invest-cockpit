@@ -89,8 +89,10 @@ export function readImportSources(): ImportSourceResult[] {
 }
 
 // 深掘りリンク(JP銘柄のみ。事実として確認済みのURL形式。docs/design.md 増分2の調査結果を参照)
+// 決算ナビはリポジトリ直下がリダイレクトスタブ(location.replaceでフラグメントを落とす)ため、
+// 実体である frontend/ 配下を直接指す(reviewer重大2 / Codex P2で確認済みの事実)。
 export function kessanNaviUrl(code: string): string {
-  return `https://kojit1229.github.io/stock_analyze/#/stock/${encodeURIComponent(code)}`;
+  return `https://kojit1229.github.io/stock_analyze/frontend/#/stock/${encodeURIComponent(code)}`;
 }
 
 export function jukyuNaviUrl(code: string): string {

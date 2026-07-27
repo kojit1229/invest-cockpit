@@ -45,10 +45,17 @@ export function latestClose(series: PriceSeries): { value: number; date: string 
   return lastNonNull(series.daily.dates, series.daily.close) ?? lastNonNull(series.weekly.dates, series.weekly.close);
 }
 
-/** 週次3年分の最高値(nullを除いた最大値)。有効な値が無ければnull。 */
+/**
+ * 週次3年分の確定高値(nullを除いた最大値)。境界の定義: `weekly.close`の末尾1件
+ * (=進行中の週の足)は母集団から除外する。進行中週のcloseは日次の最新closeと同一値に
+ * なりうるため、除外しないと最新値が常に基準値以下になり「高値更新」が構造的に発火しない
+ * (reviewer重大3)。高値接近(95%以上)判定もこの関数を共有しているため同じ基準になる。
+ * 有効な値が無ければnull。
+ */
 export function weeklyHigh(series: PriceSeries): number | null {
   let max: number | null = null;
-  for (const v of series.weekly.close) {
+  const confirmedWeeks = series.weekly.close.slice(0, -1);
+  for (const v of confirmedWeeks) {
     if (v === null || !Number.isFinite(v)) continue;
     if (max === null || v > max) max = v;
   }
