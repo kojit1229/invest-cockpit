@@ -1,11 +1,13 @@
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { AppSettings, Market, STATUS_LABEL_JA, Ticker, TICKER_STATUSES, TickerStatus, Trade, TradeInput, TradeSide } from "../types";
 import { kessanNaviUrl, jukyuNaviUrl } from "../lib/external";
 import { computePosition } from "../lib/position";
 import { formatMoney } from "../lib/format";
 import { PriceSeries } from "../lib/pipeline";
 import { latestClose, weeklyHigh } from "../lib/events";
+import { loadSupplyDemandData, SupplyDemandResult } from "../lib/supplyDemand";
 import { TradeForm } from "./TradeForm";
+import { SupplyDemandDonut } from "./SupplyDemandDonut";
 
 interface Props {
   ticker: Ticker | undefined;
@@ -48,6 +50,23 @@ export function TickerDetail({
   onOpenPass,
 }: Props) {
   const [draftSide, setDraftSide] = useState<TradeSide | null>(null);
+  // 増分8: 需給ドーナツ。カルテを開くたびに対象コードだけをfetchする(全銘柄一括先読みはしない)。
+  // フックはRules of Hooksにより早期returnより前で無条件に呼ぶ必要があるため、
+  // market/codeの算出も(ticker未確定時のフォールバック込みで)ここへ引き上げる。
+  const [market, code] = ticker ? splitId(ticker.id) : ["", ""];
+  const [supplyDemand, setSupplyDemand] = useState<SupplyDemandResult | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setSupplyDemand(null);
+    if (market === "JP" && code !== "") {
+      loadSupplyDemandData(code).then((data) => {
+        if (!cancelled) setSupplyDemand(data);
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [market, code]);
 
   if (!ticker) {
     return (
@@ -60,7 +79,6 @@ export function TickerDetail({
     );
   }
 
-  const [market, code] = splitId(ticker.id);
   const tickerTrades = trades.filter((t) => t.tickerId === ticker.id);
   const position = computePosition(tickerTrades, ticker.id);
   const history = sortHistoryDesc(tickerTrades);
@@ -144,6 +162,16 @@ export function TickerDetail({
               </dl>
             );
           })()}
+        </div>
+      )}
+      {market === "JP" && (
+        <div class="ticker-detail__supply-demand">
+          <h2>需給</h2>
+          {supplyDemand === null ? (
+            <p class="empty-state empty-state--small">取得中…</p>
+          ) : (
+            <SupplyDemandDonut buy={supplyDemand.buy} sell={supplyDemand.sell} errors={supplyDemand.errors} />
+          )}
         </div>
       )}
       <div class="ticker-detail__position">
