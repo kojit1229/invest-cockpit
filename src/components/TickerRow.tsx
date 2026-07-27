@@ -1,17 +1,20 @@
 import { Ticker, TickerStatus, TICKER_STATUSES, STATUS_LABEL_JA } from "../types";
+import { tickerHref } from "../lib/router";
 
 interface Props {
   ticker: Ticker;
   onStatusChange: (id: string, status: TickerStatus) => void;
 }
 
-/** 銘柄1件のカード表示。状態変更セレクトを持つ。 */
+/** 銘柄1件のカード表示。状態変更セレクトを持つ。IDと名称は銘柄カルテへのリンク。 */
 export function TickerRow({ ticker, onStatusChange }: Props) {
   return (
     <li class="ticker-row">
       <div class="ticker-row__main">
-        <span class="ticker-row__id">{ticker.id}</span>
-        <span class="ticker-row__name">{ticker.name}</span>
+        <a class="ticker-row__link" href={tickerHref(ticker.id)}>
+          <span class="ticker-row__id">{ticker.id}</span>
+          <span class="ticker-row__name">{ticker.name}</span>
+        </a>
         <span class="ticker-row__currency">{ticker.currency}</span>
       </div>
       <div class="ticker-row__meta">
