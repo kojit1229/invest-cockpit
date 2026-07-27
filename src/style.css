@@ -534,3 +534,193 @@ body {
   color: #b00020;
   font-size: 0.8rem;
 }
+
+/* private repo同期(増分4) */
+
+.app__header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sync-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: #eee;
+  color: #555;
+  font-size: 0.72rem;
+  text-decoration: none;
+  white-space: nowrap;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sync-indicator__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #999;
+  flex: none;
+}
+
+.sync-indicator__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sync-indicator--unset .sync-indicator__dot,
+.sync-indicator--idle .sync-indicator__dot {
+  background: #999;
+}
+
+.sync-indicator--synced {
+  background: #e3f2e6;
+  color: #1b6b30;
+}
+
+.sync-indicator--synced .sync-indicator__dot {
+  background: #2e8b46;
+}
+
+.sync-indicator--syncing {
+  background: #e6f0fb;
+  color: #1a5fb4;
+}
+
+.sync-indicator--syncing .sync-indicator__dot {
+  background: #1a5fb4;
+}
+
+.sync-indicator--error {
+  background: #fbe4e4;
+  color: #a3241f;
+}
+
+.sync-indicator--error .sync-indicator__dot {
+  background: #c0392b;
+}
+
+.settings-page h1 {
+  font-size: 1.2rem;
+  margin: 0 0 16px;
+}
+
+.settings-page__sync {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  background: white;
+}
+
+.settings-page__sync h2 {
+  font-size: 1rem;
+  margin: 0 0 10px;
+}
+
+.settings-page__hint {
+  font-size: 0.85rem;
+  color: #555;
+  line-height: 1.6;
+  margin: 0 0 14px;
+}
+
+.settings-page__status {
+  font-size: 0.85rem;
+  margin: 0 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.settings-page__form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-page__form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: #444;
+}
+
+.settings-page__form input {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 1rem;
+}
+
+.settings-page__actions {
+  display: flex;
+  gap: 10px;
+}
+
+.settings-page__actions button {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  border-radius: 6px;
+  font-size: 1rem;
+}
+
+.settings-page__actions button[type="submit"] {
+  background: var(--accent);
+  color: white;
+}
+
+.settings-page__clear {
+  background: #eee;
+  color: #b00020;
+}
+
+.settings-page__saved {
+  margin: 10px 0 0;
+  color: var(--accent);
+  font-size: 0.85rem;
+}
+
+.settings-page__sync-now {
+  margin-top: 14px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: white;
+  color: var(--accent);
+  font-size: 1rem;
+}
+
+.conflict-dialog__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 100;
+}
+
+.conflict-dialog {
+  background: white;
+  border-radius: 10px;
+  padding: 18px;
+  max-width: 420px;
+  width: 100%;
+}
+
+.conflict-dialog h2 {
+  margin: 0 0 10px;
+  font-size: 1.05rem;
+}
+
+.conflict-dialog p {
