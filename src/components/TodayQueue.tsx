@@ -20,6 +20,8 @@ interface Props {
   /** 起動直後、pipelineの初回fetchがまだ終わっていない間はtrue。 */
   pipelineLoading: boolean;
   today: string;
+  /** 増分7: 判断キューの各カードから見送りワンタップの理由タグ選択ダイアログを開く。 */
+  onOpenPass: (tickerId: string) => void;
 }
 
 const STALE_THRESHOLD_DAYS = 7;
@@ -33,7 +35,16 @@ function sourceLabel(asOf: string | null, error: boolean, loading: boolean, toda
 }
 
 /** 今日の判断キュー(増分5): 決算接近・高値接近/更新・損切り接近を今日画面の先頭に表示する。 */
-function JudgmentQueue({ events, kessanAsOf, jukyuAsOf, kessanError, jukyuError, pipelineLoading, today }: Props) {
+function JudgmentQueue({
+  events,
+  kessanAsOf,
+  jukyuAsOf,
+  kessanError,
+  jukyuError,
+  pipelineLoading,
+  today,
+  onOpenPass,
+}: Props) {
   return (
     <section class="judgment-queue">
       <h2>今日の判断キュー</h2>
@@ -49,6 +60,9 @@ function JudgmentQueue({ events, kessanAsOf, jukyuAsOf, kessanError, jukyuError,
               </a>
               <p class="judgment-queue__detail">{e.detail}</p>
               <p class="judgment-queue__date">データ日付: {e.dataDate}</p>
+              <button type="button" class="judgment-queue__pass-btn" onClick={() => onOpenPass(e.tickerId)}>
+                見送る
+              </button>
             </li>
           ))}
         </ul>

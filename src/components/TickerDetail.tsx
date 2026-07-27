@@ -1,5 +1,5 @@
 import { useState } from "preact/hooks";
-import { STATUS_LABEL_JA, Ticker, TICKER_STATUSES, TickerStatus, Trade, TradeInput, TradeSide } from "../types";
+import { AppSettings, Market, STATUS_LABEL_JA, Ticker, TICKER_STATUSES, TickerStatus, Trade, TradeInput, TradeSide } from "../types";
 import { kessanNaviUrl, jukyuNaviUrl } from "../lib/external";
 import { computePosition } from "../lib/position";
 import { formatMoney } from "../lib/format";
@@ -15,6 +15,10 @@ interface Props {
   onDeleteTrade: (tradeId: string) => void;
   /** 増分5: 需給ナビの株価シリーズ(銘柄コード-> シリーズ)。JP銘柄のみ対象。 */
   prices: Map<string, PriceSeries>;
+  /** 増分7: ポジションサイズ計算機の既定許容損失額(通貨別)。 */
+  settings: AppSettings | undefined;
+  /** 増分7: 見送りワンタップの理由タグ選択ダイアログを開く(`src/app.tsx` `handleOpenPass`)。 */
+  onOpenPass: (tickerId: string) => void;
 }
 
 /** 銘柄IDを市場プレフィックスとコードに分ける。"JP:7203" -> ["JP", "7203"] */
@@ -33,7 +37,16 @@ function sortHistoryDesc(trades: Trade[]): Trade[] {
 }
 
 /** 銘柄カルテ画面(`#/ticker/<id>`)。銘柄の詳細、建玉、取引記録・履歴、旧アプリへの深掘りリンクを表示する。 */
-export function TickerDetail({ ticker, trades, onStatusChange, onAddTrade, onDeleteTrade, prices }: Props) {
+export function TickerDetail({
+  ticker,
+  trades,
+  onStatusChange,
+  onAddTrade,
+  onDeleteTrade,
+  prices,
+  settings,
+  onOpenPass,
+}: Props) {
   const [draftSide, setDraftSide] = useState<TradeSide | null>(null);
 
   if (!ticker) {
@@ -51,6 +64,9 @@ export function TickerDetail({ ticker, trades, onStatusChange, onAddTrade, onDel
   const tickerTrades = trades.filter((t) => t.tickerId === ticker.id);
   const position = computePosition(tickerTrades, ticker.id);
   const history = sortHistoryDesc(tickerTrades);
+  // ポジションサイズ計算機(増分7)の既定許容損失額。銘柄の通貨に応じてsettingsの対応フィールドを選ぶ。
+  const defaultRiskAmount = ticker.currency === "JPY" ? settings?.defaultRiskJPY : settings?.defaultRiskUSD;
+  const passedEventsDesc = ticker.passedEvents ? [...ticker.passedEvents].reverse() : [];
 
   return (
     <section class="ticker-detail">
@@ -86,6 +102,9 @@ export function TickerDetail({ ticker, trades, onStatusChange, onAddTrade, onDel
             <option value={s}>{STATUS_LABEL_JA[s]}</option>
           ))}
         </select>
+        <button type="button" class="ticker-detail__pass-btn" onClick={() => onOpenPass(ticker.id)}>
+          見送る
+        </button>
       </label>
       {market === "JP" && (
         <div class="ticker-detail__price">
@@ -190,6 +209,10 @@ export function TickerDetail({ ticker, trades, onStatusChange, onAddTrade, onDel
           <TradeForm
             tickerId={ticker.id}
             side={draftSide}
+            currency={ticker.currency}
+            market={market as Market}
+            trades={tickerTrades}
+            defaultRiskAmount={defaultRiskAmount}
             onSubmit={(input) => {
               onAddTrade(input);
               setDraftSide(null);
@@ -232,6 +255,21 @@ export function TickerDetail({ ticker, trades, onStatusChange, onAddTrade, onDel
                 >
                   削除
                 </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <div class="ticker-detail__pass-history">
+        <h2>見送り履歴</h2>
+        {passedEventsDesc.length === 0 ? (
+          <p class="empty-state empty-state--small">見送り記録はありません</p>
+        ) : (
+          <ul class="pass-history">
+            {passedEventsDesc.map((e, i) => (
+              <li class="pass-history__item" key={`${e.date}-${i}`}>
+                <span class="pass-history__date">{e.date}</span>
+                <span class="pass-history__tags">{e.tags.join(" / ")}</span>
               </li>
             ))}
           </ul>

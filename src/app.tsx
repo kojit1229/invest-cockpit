@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { AppStateV1, Market, Ticker, TickerStatus, CURRENCY_BY_MARKET, Trade, TradeInput } from "./types";
+import { AppSettings, AppStateV1, Market, PassReasonTag, Ticker, TickerStatus, CURRENCY_BY_MARKET, Trade, TradeInput } from "./types";
 import { loadState, saveState } from "./lib/storage";
 import { nowStr, todayStr } from "./lib/date";
 import { useHashRoute } from "./lib/router";
@@ -23,6 +23,10 @@ import { ImportPage } from "./components/ImportPage";
 import { SettingsPage } from "./components/SettingsPage";
 import { SyncIndicator } from "./components/SyncIndicator";
 import { ConflictDialog } from "./components/ConflictDialog";
+import { PassDialog } from "./components/PassDialog";
+
+/** append-onlyの見送り履歴の上限(増分7、docs/design.md 増分7節)。超過分は古いものから削除する。 */
+const MAX_PASSED_EVENTS = 20;
 
 /** private repo同期のデバウンス間隔(mutation後3秒。docs/design.md 増分4節)。 */
 const PUSH_DEBOUNCE_MS = 3000;
@@ -59,6 +63,10 @@ export function App() {
   const [syncPhase, setSyncPhase] = useState<SyncPhase>(() => (hasToken() ? "idle" : "unset"));
   const [syncError, setSyncError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<{ remoteState: AppStateV1; sha: string } | null>(null);
+
+  // 見送りワンタップ(増分7): カルテ画面・今日の判断キューの両方から同じダイアログを開く対象の
+  // tickerIdを保持する。nullなら非表示。
+  const [passTarget, setPassTarget] = useState<string | null>(null);
 
   // 増分5: 決算ナビ・需給ナビの公開JSONから決定論イベント(今日の判断キュー)を作るための入力データ。
   // 未取得(pipeline===null)は起動直後の初回fetch待ち。
@@ -322,6 +330,41 @@ export function App() {
     }));
   }
 
+  // 見送りワンタップ(増分7): カルテの「見送る」・今日の判断キューの各カードの「見送る」の
+  // 両方から呼ぶ共通導線。ダイアログでタグ確定後にstatus=passed+passedEvents追記する。
+  function handleOpenPass(tickerId: string) {
+    setPassTarget(tickerId);
+  }
+
+  function handleCancelPass() {
+    setPassTarget(null);
+  }
+
+  function handleConfirmPass(tags: PassReasonTag[]) {
+    if (!passTarget) return;
+    const targetId = passTarget;
+    const now = nowStr();
+    const today = todayStr();
+    setState((prev) => ({
+      ...prev,
+      tickers: prev.tickers.map((t) => {
+        if (t.id !== targetId) return t;
+        const events = [...(t.passedEvents ?? []), { date: today, tags }];
+        // append-only上限20件。超過分は古いものから削除する(docs/design.md 増分7節)。
+        const passedEvents =
+          events.length > MAX_PASSED_EVENTS ? events.slice(events.length - MAX_PASSED_EVENTS) : events;
+        return { ...t, status: "passed" as const, passedEvents, updatedAt: now };
+      }),
+      lastModified: now,
+    }));
+    setPassTarget(null);
+  }
+
+  function handleSettingsChange(next: AppSettings) {
+    const now = nowStr();
+    setState((prev) => ({ ...prev, settings: next, lastModified: now }));
+  }
+
   return (
     <div class="app">
       <header class="app__header">
@@ -345,6 +388,7 @@ export function App() {
               jukyuError={pipeline ? pipeline.errors.jukyu : false}
               pipelineLoading={pipeline === null}
               today={today}
+              onOpenPass={handleOpenPass}
             />
             <AddTickerForm onAdd={handleAdd} />
             <a class="import-link" href="#/import">
@@ -360,6 +404,8 @@ export function App() {
             onAddTrade={handleAddTrade}
             onDeleteTrade={handleDeleteTrade}
             prices={pipeline?.prices ?? new Map()}
+            settings={state.settings}
+            onOpenPass={handleOpenPass}
           />
         )}
         {route.name === "import" && (
@@ -374,6 +420,8 @@ export function App() {
             syncError={syncError}
             onTokenChanged={handleTokenChanged}
             onSyncNow={handleSyncNow}
+            settings={state.settings}
+            onSettingsChange={handleSettingsChange}
           />
         )}
       </main>
@@ -382,6 +430,13 @@ export function App() {
           remoteState={conflict.remoteState}
           onAdoptRemote={handleAdoptRemote}
           onKeepLocal={handleKeepLocal}
+        />
+      )}
+      {passTarget && (
+        <PassDialog
+          tickerName={state.tickers.find((t) => t.id === passTarget)?.name ?? passTarget}
+          onConfirm={handleConfirmPass}
+          onCancel={handleCancelPass}
         />
       )}
     </div>
