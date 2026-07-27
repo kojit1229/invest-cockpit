@@ -1,0 +1,181 @@
+:root {
+  color-scheme: light;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", sans-serif;
+  --border: #d9d9d9;
+  --bg: #fafafa;
+  --accent: #1a5fb4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: #1a1a1a;
+}
+
+.app {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 16px;
+  padding-bottom: 64px;
+}
+
+.app__header h1 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.app__tagline {
+  margin: 4px 0 20px;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.today-queue__group {
+  margin-bottom: 20px;
+}
+
+.today-queue__group h2 {
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+
+.today-queue__count {
+  font-size: 0.8rem;
+  color: #666;
+  background: #eee;
+  border-radius: 10px;
+  padding: 1px 8px;
+}
+
+.empty-state {
+  color: #777;
+  font-size: 0.9rem;
+  padding: 8px 0;
+}
+
+.empty-state--small {
+  font-size: 0.85rem;
+  padding: 2px 0;
+}
+
+.ticker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ticker-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: white;
+}
+
+.ticker-row__main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ticker-row__id {
+  font-weight: 600;
+}
+
+.ticker-row__currency {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: #888;
+}
+
+.ticker-row__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.ticker-row__status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ticker-row__status select {
+  /* iOS Safariはフォームコントロールのfont-sizeが16px未満だとフォーカス時に自動ズームする */
+  font-size: 1rem;
+}
+
+.add-form {
+  border-top: 2px solid var(--border);
+  padding-top: 16px;
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.add-form h2 {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.add-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: #444;
+}
+
+.add-form__row {
+  display: flex;
+  gap: 10px;
+}
+
+.add-form__row label {
+  flex: 1;
+}
+
+.add-form input,
+.add-form select {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 1rem;
+}
+
+.add-form__hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #888;
+}
+
+.add-form__error {
+  margin: 0;
+  color: #b00020;
+  font-size: 0.85rem;
+}
+
+.add-form button {
+  padding: 10px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: white;
+  font-size: 1rem;
+}
