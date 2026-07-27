@@ -188,3 +188,122 @@ async function loadJsfSegments(
   let kashikabuDiff: number | null = null;
   for (const offset of [1, 2, 3, 4]) {
     const candidateDate = subtractDays(latestApplyDate, offset);
+    const priorRaw = await fetchJson(jsfSnapshotUrl(candidateDate));
+    if (priorRaw !== null) {
+      const prior = readJsfIssue(priorRaw, code);
+      if (prior !== null) {
+        yushiDiff = current.yushi_zan - prior.yushi_zan;
+        kashikabuDiff = current.kashikabu_zan - prior.kashikabu_zan;
+      }
+      break;
+    }
+  }
+
+  return {
+    buy: {
+      key: "jsf_yushi",
+      label: "信用買い残(代理: 日証金融資残高)",
+      qty: current.yushi_zan,
+      asOf: latestApplyDate,
+      diff: yushiDiff,
+      diffPeriod: "day",
+    },
+    sell: {
+      key: "jsf_kashikabu",
+      label: "信用売り残(代理: 日証金貸株残高)",
+      qty: current.kashikabu_zan,
+      asOf: latestApplyDate,
+      diff: kashikabuDiff,
+      diffPeriod: "day",
+    },
+    error: false,
+  };
+}
+
+async function loadJpxShortSegment(code: string): Promise<{ segment: SupplyDemandSegment | null; error: boolean }> {
+  const metaRaw = await fetchJson(JPX_SHORT_META_URL);
+  if (typeof metaRaw !== "object" || metaRaw === null) return { segment: null, error: true };
+  const latestShortDate = (metaRaw as Record<string, unknown>).latest_short_date;
+  if (typeof latestShortDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(latestShortDate)) {
+    return { segment: null, error: true };
+  }
+
+  // シャード404は「このプレフィックスに空売り報告銘柄が無い」正常系(docs/design.md (j)節)。
+  const shardRaw = await fetchJson(jpxShortShardUrl(code));
+  const events = shardRaw === null ? null : readShortEvents(shardRaw, code);
+  if (events === null || events.length === 0) return { segment: null, error: false };
+
+  const currentQty = sumActiveShortQty(events, latestShortDate);
+  const weekAgoQty = sumActiveShortQty(events, subtractDays(latestShortDate, 7));
+
+  return {
+    segment: {
+      key: "jpx_short",
+      label: "機関投資家空売り報告 合計",
+      qty: currentQty,
+      asOf: latestShortDate,
+      diff: currentQty - weekAgoQty,
+      diffPeriod: "week",
+    },
+    error: false,
+  };
+}
+
+/** 需給ドーナツ用データを1コード分ロードする。3ソースは並行・独立して失敗を隔離する。 */
+export async function loadSupplyDemandData(code: string): Promise<SupplyDemandResult> {
+  const [jsda, jsf, jpxShort] = await Promise.all([
+    loadJsdaSegment(code),
+    loadJsfSegments(code),
+    loadJpxShortSegment(code),
+  ]);
+
+  const buy: SupplyDemandSegment[] = [];
+  if (jsf.buy) buy.push(jsf.buy);
+
+  const sell: SupplyDemandSegment[] = [];
+  if (jsda.segment) sell.push(jsda.segment);
+  if (jpxShort.segment) sell.push(jpxShort.segment);
+  if (jsf.sell) sell.push(jsf.sell);
+
+  const errors: SupplyDemandSourceError[] = [];
+  if (jsda.error) errors.push({ source: "jsda", label: "JSDA週次貸借" });
+  if (jpxShort.error) errors.push({ source: "jpx_short", label: "JPX機関投資家空売り報告" });
+  if (jsf.error) errors.push({ source: "jsf", label: "日証金日次貸借" });
+
+  return { buy, sell, errors };
+}
+
+export type SupplyDemandJudgment = "buy-dominant" | "sell-dominant" | "neutral" | "no-data";
+
+export const JUDGMENT_LABEL_JA: Record<SupplyDemandJudgment, string> = {
+  "buy-dominant": "買い優勢",
+  "sell-dominant": "売り優勢",
+  neutral: "中立",
+  "no-data": "データ不足",
+};
+
+/**
+ * 買い合計÷売り合計の倍率で単純判定する(既存needs需給ナビsignals.jsonは実在しないため常にこの経路、
+ * docs/design.md (j)節)。>1.5買い優勢、<0.7売り優勢、それ以外は中立。0除算はbuy-dominant/no-dataに丸める。
+ */
+export function classifySupplyDemand(buyTotal: number, sellTotal: number): SupplyDemandJudgment {
+  if (buyTotal <= 0 && sellTotal <= 0) return "no-data";
+  if (sellTotal <= 0) return "buy-dominant";
+  if (buyTotal <= 0) return "sell-dominant";
+  const ratio = buyTotal / sellTotal;
+  if (ratio > 1.5) return "buy-dominant";
+  if (ratio < 0.7) return "sell-dominant";
+  return "neutral";
+}
+
+export function sumQty(segments: SupplyDemandSegment[]): number {
+  return segments.reduce((acc, s) => acc + s.qty, 0);
+}
+
+/** 前週比/前日比の矢印。diff無し(比較データなし)は空文字。 */
+export function diffArrow(diff: number | null): string {
+  if (diff === null) return "";
+  if (diff > 0) return "↑";
+  if (diff < 0) return "↓";
+  return "→";
+}
