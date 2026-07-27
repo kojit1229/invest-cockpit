@@ -121,6 +121,29 @@ export interface Trade {
 export type TradeInput = Omit<Trade, "id" | "createdAt">;
 
 /**
+ * 引け後ブリーフ(増分10)への採否判断1件(`src/lib/brief.ts` `loadBrief`が取得するAI生成
+ * counterpointに対するK自身の判断)。append-onlyで`AppStateV1.briefFeedback`に積む
+ * (上限50件、古い順に削除。`src/app.tsx` `handleBriefFeedback`)。ブリーフ本文はstateに
+ * 保存しない(採否記録だけが学習シグナルとして残る、docs/design.md 増分10節)。
+ *
+ * `textPrefix`: 突合キーの一部(counterpoint.textの先頭32字)。同一ブリーフ日付+tickerId+stance
+ * の組み合わせが将来複数counterpointを持ちうる場合に備え、テキストでも区別できるようにする
+ * 加算的フィールド(design.mdの型メモには無いが、突合仕様「date+tickerId+stance+textの先頭32字」
+ * を満たすために追加した実装判断)。
+ */
+export interface BriefFeedback {
+  /** ブリーフのas_of(YYYY-MM-DD)。文字列Date解析は禁止。 */
+  date: string;
+  /** 対象銘柄ID。個別銘柄に紐づかない指摘の場合はnull。 */
+  tickerId: string | null;
+  stance: string;
+  verdict: "adopted" | "dismissed";
+  /** 判断した時刻(nowStr()形式)。 */
+  decidedAt: string;
+  textPrefix: string;
+}
+
+/**
  * localStorageキー `invest_koro_state_v1` に保存する値の形。
  * `trades` は増分3で追加した加算的フィールド(schema_versionは1のまま)。
  * 旧データ(trades欠損)は空配列として扱う(src/lib/storage.ts loadState)。
@@ -137,6 +160,8 @@ export interface AppStateV1 {
   trades?: Trade[];
   lastModified: string;
   settings?: AppSettings;
+  /** 引け後ブリーフの採否ログ(増分10)。旧データ(欠損)は空配列扱い(src/lib/storage.ts loadState)。 */
+  briefFeedback?: BriefFeedback[];
 }
 
 export const STORAGE_KEY = "invest_koro_state_v1";

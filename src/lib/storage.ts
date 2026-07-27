@@ -1,10 +1,19 @@
 // データアダプタ: localStorage v1。private repo同期は後続増分(docs/design.md (c) 参照)。
 // 方針: 壊れたデータでもアプリを落とさない(寛容パース)。書き込みは常に正規スキーマで行う。
 
-import { AppSettings, AppStateV1, STORAGE_KEY, Ticker, TickerStatus, TICKER_STATUSES, Trade } from "../types";
+import {
+  AppSettings,
+  AppStateV1,
+  BriefFeedback,
+  STORAGE_KEY,
+  Ticker,
+  TickerStatus,
+  TICKER_STATUSES,
+  Trade,
+} from "../types";
 
 function emptyState(): AppStateV1 {
-  return { schema_version: 1, tickers: [], trades: [], lastModified: "" };
+  return { schema_version: 1, tickers: [], trades: [], lastModified: "", briefFeedback: [] };
 }
 
 /**
@@ -47,6 +56,23 @@ function isValidSettings(v: unknown): v is AppSettings {
       (typeof s.defaultRiskJPY === "number" && Number.isFinite(s.defaultRiskJPY))) &&
     (s.defaultRiskUSD === undefined ||
       (typeof s.defaultRiskUSD === "number" && Number.isFinite(s.defaultRiskUSD)))
+  );
+}
+
+/**
+ * 引け後ブリーフ採否ログ1件の寛容パース(増分10)。不正な行は該当要素だけを捨て、残りは生かす
+ * (isValidPassedEventと同じ方針)。
+ */
+function isValidBriefFeedback(v: unknown): v is BriefFeedback {
+  if (typeof v !== "object" || v === null) return false;
+  const b = v as Record<string, unknown>;
+  return (
+    typeof b.date === "string" &&
+    (b.tickerId === null || typeof b.tickerId === "string") &&
+    typeof b.stance === "string" &&
+    (b.verdict === "adopted" || b.verdict === "dismissed") &&
+    typeof b.decidedAt === "string" &&
+    typeof b.textPrefix === "string"
   );
 }
 
@@ -130,7 +156,10 @@ export function parseAppState(
     // settingsは増分7で追加した加算的フィールド。不正な形(型不一致)は丸ごと破棄してundefinedに
     // フォールバックする(欠損=旧データと同じ扱い)。
     const settings = isValidSettings(obj.settings) ? obj.settings : undefined;
-    return { schema_version: 1, tickers, trades, lastModified, settings };
+    // briefFeedbackは増分10で追加した加算的フィールド。欠損(旧データ)は空配列として扱う。
+    const rawBriefFeedback = Array.isArray(obj.briefFeedback) ? obj.briefFeedback : [];
+    const briefFeedback = rawBriefFeedback.filter(isValidBriefFeedback);
+    return { schema_version: 1, tickers, trades, lastModified, settings, briefFeedback };
   } catch {
     return null;
   }

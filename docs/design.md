@@ -300,3 +300,32 @@ interface Trade {
 - ラウンド一覧表: 銘柄名(カルテへのリンク)・期間(開始日〜終了日)・段数(買いtrade件数)・損益(通貨別`formatMoney`)・R倍数・理由タグ(ラウンド内の全tradeの`reasonTags`を重複排除して結合)。終了日の新しい順。
 - 見送り集計: 全銘柄の`Ticker.passedEvents`を合算し日付降順に並べた直近20件(この画面独自の集計範囲。各銘柄側のpassedEvents保存上限20件<増分7節>とは別の概念)の範囲でタグ別件数を数える(`computePassedEventTagCounts`)。0件のタグは表示しない。
 - 該当データが無い場合の空状態: クローズ済みラウンド0件は「クローズ済みの取引がまだありません」、見送り記録0件は「見送り記録はありません」、ピラミッディング対象0件は「ピラミッディング(2段以上)したラウンドはありません」。
+
+## (l) 増分10: 引け後ブリーフ表示・採否キュー(第2弾最終)
+
+`batch/brief.sh`(増分10a)が生成する`personal-data`リポジトリの引け後ブリーフ(AI反対意見つき)を今日画面に表示し、各counterpointへの採否(参考になった/却下)を記録する。実装は`src/lib/brief.ts`(fetch+検証)、`src/components/BriefCard.tsx`(表示)。ブリーフ本文はstateに保存しない(表示のたびに毎回fetchする。採否記録だけが学習シグナルとしてstateに残る)。
+
+**ブリーフの契約(取得専用、正典は`batch/brief-validate.py`)**: GitHub Contents API経由で`personal-data`リポジトリの`invest-cockpit/brief/{YYYY-MM-DD}.json`を読む。`{ schema_version:1, as_of, generated_at, generated_by:"ai", model, summary, counterpoints:[{tickerId, stance:"反対意見"|"見落とし"|"確認事項", text, basis:string[]}], health:{sources:{kessan,jukyu,state}} }`。取得は今日→前日→前々日の順に最大3日分試行し(`src/lib/date.ts` `subtractDays`)、最初に200+検証成功したものを採用する(404は正常系、それ以降の日程は試行しない)。通信先は`api.github.com`のみ、認証は増分4の同期と同じfine-grained PAT(`src/lib/sync.ts` `getToken`)を共用する。**トークン未設定ならfetchを一切呼ばず`{ kind: "no-token" }`を返す**(トークンゲート、`src/lib/brief.ts` `loadBrief`)。3日分すべて404・ネットワークエラー・スキーマ検証失敗は`{ kind: "unavailable" }`にまとめ、呼び出し側(`src/app.tsx`)は`no-token`/`unavailable`のどちらもブリーフを`null`として扱う(区別しない。取得失敗してもアプリの他機能は無影響)。
+
+**表示(`src/components/BriefCard.tsx`)**: 今日画面(`TodayQueue`)の`JudgmentQueue`直下にカードを描画する(`brief===null`ならカード自体を出さない。空状態はカードを出さないことで判断キューを邪魔しない設計方針、増分5と同じ)。カードの内容: `as_of`日付(`daysBetween(as_of, today) > 3`で「古いブリーフ」警告を赤字併記)+`summary`+`counterpoints`一覧(各要素: stanceバッジ(3色。反対意見=赤/見落とし=橙/確認事項=青)+`tickerId`が`state.tickers`に存在すればカルテへのリンク、存在しなければID文字列そのまま表示+`text`+`basis`箇条書き+採否ボタン)。ヘッダーに`generated_by:"ai"`を明示する「AI生成」バッジを常設し、決定論イベント(判断キュー)との出所を視覚的に区別する。
+
+**採否キュー(`AppStateV1.briefFeedback`)**: 加算的フィールド`briefFeedback?: BriefFeedback[]`(`src/types.ts`)。
+
+```ts
+interface BriefFeedback {
+  date: string;           // ブリーフのas_of
+  tickerId: string | null; // 対象銘柄ID。空文字列はnullに正規化する
+  stance: string;
+  verdict: "adopted" | "dismissed";
+  decidedAt: string;       // nowStr()形式
+  textPrefix: string;      // counterpoint.textの先頭32字(下記突合キーの一部)
+}
+```
+
+`textPrefix`は実装判断で追加した加算的フィールド(以下の突合キー仕様「date+tickerId+stance+textの先頭32字」を満たすため。同一銘柄・同一stanceで複数counterpointが将来発生した場合に区別する)。append-only、上限50件・超過分は古い順に削除(`src/app.tsx` `handleBriefFeedback`、`MAX_BRIEF_FEEDBACK`)。同一キー(date+tickerId+stance+textの先頭32字)の重複記録はしない(UIのボタン無効化に加え、`handleBriefFeedback`内でも二重防御)。
+
+**突合キー**: `date`(ブリーフのas_of)+`tickerId`(`counterpoint.tickerId`。空文字列は`null`)+`stance`+`text.slice(0, 32)`(`src/lib/brief.ts` `briefFeedbackTextPrefix`)の完全一致。一致する`briefFeedback`要素があれば当該counterpointの「参考になった」「却下」ボタンを無効化し、判断結果(採用済み/却下済み)を表示する(`src/components/BriefCard.tsx`)。
+
+**読み込みの寛容パース**(`src/lib/storage.ts` `isValidBriefFeedback`): 行単位。不正な要素は該当行だけを捨て、残りは生かす(`isValidPassedEvent`と同じ方針)。旧データ(`briefFeedback`欠損)は空配列として扱う。
+
+**未実装・既知の制約**: 設定画面でトークンを新規設定した直後は、次回ページ再読み込みまでブリーフは再取得されない(マウント時1回のみのfetch。増分4の同期のように`handleTokenChanged`からの即時再取得は行わない。この増分のスコープ外)。
