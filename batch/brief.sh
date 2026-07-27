@@ -250,15 +250,42 @@ log "ブリーフ生成完了: $OUT_PATH"
 # ---------- path限定push(二重防御): brief/以外の変更を検出したら中止する ----------
 # --untracked-files=all必須: 初回のように invest-cockpit/ 配下がまだ何も追跡されていない
 # 場合、既定の--porcelainは新規ディレクトリを "?? invest-cockpit/" と1行に畳んでしまい、
-# ファイル単位のpath判定(以下のgrep)を誤検知させる(2026-07-27 実行テストで発見)。
-CHANGED="$(git -C "$PERSONAL_REPO" status --porcelain --untracked-files=all)"
-if [ -z "$CHANGED" ]; then
+# ファイル単位のpath判定を誤検知させる(2026-07-27 実行テストで発見)。
+#
+# reviewer軽微L3: 以前は非-zの`--porcelain`出力を`awk '{print $2}'`で切り出していたため、
+# パスに空白を含む場合にフィールドが分断される余地があった(誤判定は常に「範囲外」扱いへの
+# 安全側フォールトのため実害は無かったが、堅牢な方式へ置き換える)。-z(NUL区切り・パスを
+# クォートしない)でgitの出力を直接process substitution経由で読み、変数へは格納しない
+# (bashの変数はNULバイトを保持できずcommand substitutionで消えるため、$()には入れない)。
+# rename/copy(ステータス先頭2文字にR/Cを含む)はNUL区切りの直後にもう1フィールド(旧パス)
+# が続くため、それも判定対象に含める。
+ANY_CHANGE=0
+OUTSIDE=""
+while IFS= read -r -d '' entry; do
+  ANY_CHANGE=1
+  status="${entry:0:2}"
+  path="${entry:3}"
+  case "$path" in
+    "${BRIEF_SUBDIR}/"*) ;;
+    *) OUTSIDE="${OUTSIDE}${path}"$'\n' ;;
+  esac
+  case "$status" in
+    *R*|*C*)
+      IFS= read -r -d '' orig_path || orig_path=""
+      case "$orig_path" in
+        "${BRIEF_SUBDIR}/"*) ;;
+        *) OUTSIDE="${OUTSIDE}${orig_path}"$'\n' ;;
+      esac
+      ;;
+  esac
+done < <(git -C "$PERSONAL_REPO" status --porcelain -z --untracked-files=all)
+
+if [ "$ANY_CHANGE" -eq 0 ]; then
   log "個人データ側は変更なし。commitしない"
   exit 0
 fi
-OUTSIDE="$(echo "$CHANGED" | awk '{print $2}' | grep -v "^${BRIEF_SUBDIR}/" || true)"
 if [ -n "$OUTSIDE" ]; then
-  die "invest-cockpit/brief/ 以外の変更を検出したためpushしない(ファイル自体は $OUT_PATH に保存済み): $OUTSIDE"
+  die "invest-cockpit/brief/ 以外の変更を検出したためpushしない(ファイル自体は $OUT_PATH に保存済み): $(printf '%s' "$OUTSIDE" | tr '\n' ' ')"
 fi
 
 git -C "$PERSONAL_REPO" add "$BRIEF_SUBDIR"

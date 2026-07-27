@@ -188,14 +188,25 @@ export function summarizeByCurrency(rounds: ClosedRound[], currency: Currency): 
 }
 
 export interface PassTagCount {
-  tag: PassReasonTag;
+  /** プリセットタグ、または非プリセットタグの合算行(`OTHER_NON_PRESET_TAG_LABEL`)。 */
+  tag: string;
   count: number;
 }
 
 /**
+ * reviewer軽微L4: `storage.ts`の`isValidPassedEvent`はtagsを「任意の文字列配列」として
+ * 寛容パースするため(プリセット外の文字列も生き残る)、集計を`PASS_REASON_TAG_PRESETS`の
+ * mapだけで組み立てると非プリセットタグの件数が黙って消え、この画面の件数総和が実際の
+ * 記録件数と食い違う。現時点でアプリからプリセット外タグを書く経路は無い(自由入力なし)が、
+ * データ不整合(手動編集・インポート等)への安全側として、非プリセットタグは合算1行として
+ * 表示に含める。
+ */
+export const OTHER_NON_PRESET_TAG_LABEL = "その他: 非プリセット";
+
+/**
  * 見送り集計: 全銘柄のpassedEventsを合算し日付降順に並べ、直近20件(この画面独自の集計範囲。
  * 各銘柄のpassedEvents自体の保存上限20件<docs/design.md 増分7節>とは別)の範囲でタグ別件数を数える。
- * 0件のタグは結果に含めない。
+ * 0件のタグは結果に含めない。非プリセットタグは`OTHER_NON_PRESET_TAG_LABEL`へ合算する。
  */
 export function computePassedEventTagCounts(tickers: Ticker[]): PassTagCount[] {
   const all: { date: string; tags: PassReasonTag[] }[] = [];
@@ -205,11 +216,22 @@ export function computePassedEventTagCounts(tickers: Ticker[]): PassTagCount[] {
   all.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
   const recent = all.slice(0, 20);
 
-  const counts = new Map<PassReasonTag, number>();
+  const presetSet: ReadonlySet<string> = new Set(PASS_REASON_TAG_PRESETS);
+  const counts = new Map<string, number>();
+  let otherCount = 0;
   for (const e of recent) {
-    for (const tag of e.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    for (const tag of e.tags) {
+      if (presetSet.has(tag)) {
+        counts.set(tag, (counts.get(tag) ?? 0) + 1);
+      } else {
+        otherCount += 1;
+      }
+    }
   }
-  return PASS_REASON_TAG_PRESETS.map((tag) => ({ tag, count: counts.get(tag) ?? 0 })).filter(
-    (c) => c.count > 0,
-  );
+  const rows: PassTagCount[] = PASS_REASON_TAG_PRESETS.map((tag) => ({
+    tag,
+    count: counts.get(tag) ?? 0,
+  })).filter((c) => c.count > 0);
+  if (otherCount > 0) rows.push({ tag: OTHER_NON_PRESET_TAG_LABEL, count: otherCount });
+  return rows;
 }

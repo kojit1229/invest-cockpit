@@ -945,6 +945,12 @@ body {
   color: #666;
 }
 
+/* reviewer軽微L5: qty=0の空状態(1単元も買えない)。エラーではないが注意喚起として
+   position-size-calc__error(#b00020)より弱いトーンにする。 */
+.position-size-calc__result--zero {
+  color: #a3661f;
+}
+
 .ticker-detail__status {
   flex-wrap: wrap;
 }

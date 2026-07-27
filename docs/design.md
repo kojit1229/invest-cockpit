@@ -235,6 +235,7 @@ interface Trade {
 
 - 単価・stopの入力欄の直後に許容損失額入力欄(`currencySymbol`で通貨記号のみ表示、`src/lib/format.ts`)を追加する。既定値は設定画面(`#/settings`)の`AppSettings.defaultRiskJPY`/`defaultRiskUSD`(銘柄の通貨に応じてどちらかを`TickerDetail`が選んで渡す)。
 - 単価・stop・許容損失額がすべて入力されると「推奨株数: N株(この取引の最大損失 ¥X)」を自動表示し、「この株数を使う」ボタンで数量欄へ反映する。単価・stopが入力済みでエントリー<=stopの場合はエラー文言のみ表示する(許容損失額の入力有無に関わらず表示する)。
+- **推奨株数0株の空状態(reviewer軽微L5)**: 許容損失額が1単元あたり損失を下回る場合(例: JP銘柄で許容損失1,000円・1株あたり損失100円→`rawQty`10だが100株単位に切り下げて0)、`recommendPositionSize`は`{qty:0, maxLoss:0}`を返す。この場合は「推奨株数: 0株」+使えない「この株数を使う」ボタンではなく、「この許容損失額では1単元(100株)も買えません」(US銘柄は「1株も買えません」)という専用文言を表示し、ボタンは出さない。
 - 買い増し時(既存建玉あり、`computePosition(trades, tickerId).qty > 0`)は、フォームに入力中のstopを使って「現在の建玉全体でstopに到達した場合の合計損失」も併記する。実装は`qty: 0, price: 0`で当該stopだけを宣言する仮想tradeを既存tradeの末尾に足して`computePosition`へ通す方式(`stopLossAmount`が既存の保有数量・平均取得単価に対して新stopを適用した値になる。今回追加する数量は含めない)。トレーリングストップ(stopを平均取得単価より上へ引き上げた場合)は`stopLossAmount`が負値になるため、`TickerDetail.tsx`の建玉セクション(reviewer軽微19)と同じく符号でラベルを切り替える(正なら「合計損失」、負なら「到達時利益額(トレーリングストップ)」、値は絶対値で表示。reviewer中2で「合計損失」表記のまま`Math.abs`していた不整合を修正)。
 
 **設定画面**(`src/components/SettingsPage.tsx`)
@@ -304,7 +305,7 @@ interface Trade {
 **サマリ・ラウンド一覧・見送り集計**:
 - サマリ(通貨別2カード、JPY/USD): クローズ済みラウンド数・勝率(勝ちラウンド数/クローズ済みラウンド数)・PF・平均R倍数(R期待値)。通貨は混ぜない(`src/lib/review.ts` `summarizeByCurrency`)。
 - ラウンド一覧表: 銘柄名(カルテへのリンク)・期間(開始日〜終了日)・段数(買いtrade件数)・損益(通貨別`formatMoney`)・R倍数・理由タグ(ラウンド内の全tradeの`reasonTags`を重複排除して結合)。終了日の新しい順。
-- 見送り集計: 全銘柄の`Ticker.passedEvents`を合算し日付降順に並べた直近20件(この画面独自の集計範囲。各銘柄側のpassedEvents保存上限20件<増分7節>とは別の概念)の範囲でタグ別件数を数える(`computePassedEventTagCounts`)。0件のタグは表示しない。
+- 見送り集計: 全銘柄の`Ticker.passedEvents`を合算し日付降順に並べた直近20件(この画面独自の集計範囲。各銘柄側のpassedEvents保存上限20件<増分7節>とは別の概念)の範囲でタグ別件数を数える(`computePassedEventTagCounts`)。0件のタグは表示しない。`storage.ts`の寛容パースはtagsを任意の文字列配列として通すため、プリセット外のタグ(現状アプリからは書き込まれない。手動編集・インポート等のデータ不整合時のみ発生しうる)は`その他: 非プリセット`(`OTHER_NON_PRESET_TAG_LABEL`)へ合算し、総和が実際の記録件数と食い違わないようにする(reviewer軽微L4)。
 - 該当データが無い場合の空状態: クローズ済みラウンド0件は「クローズ済みの取引がまだありません」、見送り記録0件は「見送り記録はありません」、ピラミッディング対象0件は「ピラミッディング(2段以上)したラウンドはありません」。
 
 ## (l) 増分10: 引け後ブリーフ表示・採否キュー(第2弾最終)
@@ -313,14 +314,16 @@ interface Trade {
 
 **ブリーフの契約(取得専用、正典は`batch/brief-validate.py`)**: GitHub Contents API経由で`personal-data`リポジトリの`invest-cockpit/brief/{YYYY-MM-DD}.json`を読む。`{ schema_version:1, as_of, generated_at, generated_by:"ai", model, summary, counterpoints:[{tickerId, stance:"反対意見"|"見落とし"|"確認事項", text, basis:string[]}], health:{sources:{kessan,jukyu,state}} }`。取得は今日→前日→前々日の順に最大3日分試行し(`src/lib/date.ts` `subtractDays`)、最初に200+検証成功したものを採用する(404は正常系、それ以降の日程は試行しない)。通信先は`api.github.com`のみ、認証は増分4の同期と同じfine-grained PAT(`src/lib/sync.ts` `getToken`)を共用する。**トークン未設定ならfetchを一切呼ばず`{ kind: "no-token" }`を返す**(トークンゲート、`src/lib/brief.ts` `loadBrief`)。3日分すべて404・ネットワークエラー・スキーマ検証失敗は`{ kind: "unavailable" }`にまとめ、呼び出し側(`src/app.tsx`)は`no-token`/`unavailable`のどちらもブリーフを`null`として扱う(区別しない。取得失敗してもアプリの他機能は無影響)。
 
-**表示(`src/components/BriefCard.tsx`)**: 今日画面(`TodayQueue`)の`JudgmentQueue`直下にカードを描画する(`brief===null`ならカード自体を出さない。空状態はカードを出さないことで判断キューを邪魔しない設計方針、増分5と同じ)。カードの内容: `as_of`日付(`daysBetween(as_of, today) > 3`で「古いブリーフ」警告を赤字併記)+`summary`+`counterpoints`一覧(各要素: stanceバッジ(3色。反対意見=赤/見落とし=橙/確認事項=青)+`tickerId`が`state.tickers`に存在すればカルテへのリンク、存在しなければID文字列そのまま表示+`text`+`basis`箇条書き+採否ボタン)。ヘッダーに`generated_by:"ai"`を明示する「AI生成」バッジを常設し、決定論イベント(判断キュー)との出所を視覚的に区別する。
+**表示(`src/components/BriefCard.tsx`)**: 今日画面(`TodayQueue`)の`JudgmentQueue`直下にカードを描画する(`brief===null`ならカード自体を出さない。空状態はカードを出さないことで判断キューを邪魔しない設計方針、増分5と同じ)。カードの内容: `as_of`日付(`daysBetween(as_of, today) > 0`で「古いブリーフ」警告を赤字併記。`loadBrief`のフォールバック<今日→前日→前々日、`LOOKBACK_DAYS=2`>で当日分以外を採用した場合に必ず表示する。以前は閾値3だったが、フォールバックは最大2日分しか試行しないため`daysBetween`が3を超えることは無く到達不能なデッドコードだった<reviewer軽微L1>)+`summary`+`counterpoints`一覧(各要素: stanceバッジ(3色。反対意見=赤/見落とし=橙/確認事項=青)+`tickerId`が`state.tickers`に存在すればカルテへのリンク、存在しなければID文字列そのまま表示+`text`+`basis`箇条書き+採否ボタン)。ヘッダーに`generated_by:"ai"`を明示する「AI生成」バッジを常設し、決定論イベント(判断キュー)との出所を視覚的に区別する。
 
 **採否キュー(`AppStateV1.briefFeedback`)**: 加算的フィールド`briefFeedback?: BriefFeedback[]`(`src/types.ts`)。
+
+**`tickerId: null`について(reviewer軽微L6)**: 型は`string | null`だが、`brief-validate.py`と`src/lib/brief.ts` `isValidCounterpoint`がともに`counterpoints[].tickerId`の非空を必須にしており、`batch/brief-prompt.md`も「個別銘柄に紐づかない全体コメントは出さない」とAIへ指示しているため、現契約では`counterpoint.tickerId`(ひいてはこれをそのまま使う`BriefFeedback.tickerId`)が実際に`null`になる経路は無い(空文字列→null正規化コード自体は到達不能)。将来「銘柄に紐づかない指摘」を許容する拡張の余地として型・正規化コードは残すが、**現契約では常に非null**と理解すること。
 
 ```ts
 interface BriefFeedback {
   date: string;           // ブリーフのas_of
-  tickerId: string | null; // 対象銘柄ID。空文字列はnullに正規化する
+  tickerId: string | null; // 対象銘柄ID。空文字列はnullに正規化する(現契約では常に非null、上記L6注記参照)
   stance: string;
   verdict: "adopted" | "dismissed";
   decidedAt: string;       // nowStr()形式
@@ -344,6 +347,8 @@ interface BriefFeedback {
 
 **出力ファイル契約(固定・変更不可)**: `personal-data`リポジトリの`invest-cockpit/brief/YYYY-MM-DD.json`。スキーマは(l)節のブリーフ契約と同一(`{schema_version:1, as_of, generated_at, generated_by:"ai", model, summary, counterpoints:[...], health:{sources:{kessan,jukyu,state}}}`)。生成物のバリデーションは`brief-validate.py`が正典で、不正ならファイルを出さずexit 1(フェイルラウド)。
 
+**バリデーション上限(reviewer軽微L2)**: `summary`は600字以内・改行区切り3行以内。`counterpoints`は10件以内、各要素の`text`は200字以内、`basis`は1〜5件・各要素200字以内。上限超過は他のスキーマ違反と同じくexit 1でファイルを出さない。最終JSONの`counterpoints`は検証済みの既知フィールド(`tickerId`/`stance`/`text`/`basis`)のみで再構築し、AI応答に含まれる未知キーは通さない(将来のスキーマ拡張時に暗黙の前提を作らないため。現状`href`等の危険な経路は無い)。
+
 **入力**: `personal-data/invest-cockpit/state.json`(無ければ空状態として続行し`health.state=false`)+ 決算ナビ/需給ナビの公開JSON(GitHub Pages本番)。`brief-collect.py`がソース単位で失敗を隔離する。
 
 **冪等規則**: 冪等キーは`as_of`(=当日日付)の1日1ファイル。`git pull --ff-only`の**後**に当日ファイルの存在をチェックする(他マシンで既に生成・push済みの当日分を見落として二重生成しないため)。当日ファイルが存在し、かつローカルHEADにそのファイルへのcommitはあるが上流(リモート追跡ブランチ)へ届いていない場合(前回実行がcommit後・push前に失敗した状態)は、生成(claude呼び出し)をやり直さずpushだけ再試行する(2026-07-27修正、reviewer中1「M1」: 旧実装はファイル存在だけを見ていたため、push失敗で死んだ日は以後永久に再生成がスキップされ、ブリーフが二度とpushされない穴があった)。`--force`は当日ファイルを無条件に上書きする。
@@ -352,7 +357,7 @@ interface BriefFeedback {
 
 **予算・多重起動防止**: 実行前に`cost-check.sh --stage invest-koro-brief`で日次予算(既定$1.00、`BRIEF_BUDGET`)を確認し、超過時は今回分をスキップする(queueへは積まない)。同時多重起動はPIDロックファイル(`memory/collect/invest-koro-brief.lock`)で防止する(`analyze-kessan.sh`と同方式)。
 
-**path限定push(二重防御)**: commit前に`personal-data`の変更が`invest-cockpit/brief/`配下だけであることを確認し、それ以外の変更(他バッチが同じ作業ツリーに残した未コミット変更等)を検出したらpushせずdieする(ファイル自体は書き込み済みで失われない)。
+**path限定push(二重防御)**: commit前に`personal-data`の変更が`invest-cockpit/brief/`配下だけであることを確認し、それ以外の変更(他バッチが同じ作業ツリーに残した未コミット変更等)を検出したらpushせずdieする(ファイル自体は書き込み済みで失われない)。判定は`git status --porcelain -z --untracked-files=all`をprocess substitution経由でNUL区切りのまま読む方式(reviewer軽微L3。以前は非-z出力を`awk '{print $2}'`で切り出しており、空白を含むパスでフィールドが分断される余地があった。誤判定は常に「範囲外」扱いへの安全側フォールトのため実害は無かったが、堅牢な方式へ置き換えた。bash変数はNULバイトを保持できないため、`$()`には入れずreadループへ直接流し込む)。
 
 **個人データの外部送信(プライバシー注記、reviewer中4)**: `brief.sh`は`state.json`から`brief-collect.py`が抽出したコンテキスト(保有銘柄・建玉数量・平均取得単価・stop・見送り履歴等)と決算ナビ/需給ナビの公開JSONを`claude -p`の標準入力(=プロンプト)としてAnthropicのモデルAPI(`$BRIEF_MODEL`、既定`claude-sonnet-5`)へ送信する。これは本アプリの個人データが自宅端末の外(モデル推論エンドポイント)へ渡る唯一の経路であり、(d)節の公開/privateデータ境界における例外事項として明記する。`--allowedTools ""`でclaude側のツール実行はすべて無効化しており、送信は「プロンプトとしての読み取り専用データ」に限られる(claude側からの追加fetch・ファイル操作は発生しない)。認証情報(GitHubトークン等)は本バッチが直接扱わない(git credential helper任せ)ため、この送信経路には含まれない。
 

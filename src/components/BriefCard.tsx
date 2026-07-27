@@ -23,7 +23,12 @@ interface Props {
   }) => void;
 }
 
-const STALE_THRESHOLD_DAYS = 3;
+// reviewer軽微L1: 以前は3だった。loadBrief(src/lib/brief.ts LOOKBACK_DAYS=2)は
+// 今日→前日→前々日の3日分しか試行しないため、daysBetween(as_of, today)は最大2にしか
+// ならず「> 3」は到達不能なデッドコードだった(design.mdの記載自体も自己矛盾)。
+// この警告の実質的な意図は「フォールバックで古い日のブリーフを表示している」ことを
+// 知らせることなので、閾値を0にしてフォールバック発生時に必ず表示されるようにする。
+const STALE_THRESHOLD_DAYS = 0;
 
 const STANCE_CLASS: Record<string, string> = {
   反対意見: "oppose",

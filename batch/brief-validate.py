@@ -21,6 +21,13 @@ VALID_STANCES = {"反対意見", "見落とし", "確認事項"}
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 MAX_TEXT_LEN = 200
 MAX_SUMMARY_LINES = 3
+# reviewer軽微L2: 以前はtext 200字のみに上限があり、counterpoints件数・basis要素数・
+# basis各要素の長さ・summary文字数(行数のみ制限)には上限が無かった。暴走したモデル出力が
+# そのままpersonal-dataへ入る余地を塞ぐ。
+MAX_SUMMARY_LEN = 600
+MAX_COUNTERPOINTS = 10
+MAX_BASIS_ITEMS = 5
+MAX_BASIS_LEN = 200
 
 
 def fail(msg):
@@ -51,6 +58,8 @@ def main(argv):
     summary = candidate.get("summary")
     if not isinstance(summary, str) or not summary.strip():
         fail("summaryが空、または文字列でない")
+    if len(summary) > MAX_SUMMARY_LEN:
+        fail(f"summaryが{MAX_SUMMARY_LEN}字を超えている({len(summary)}字)")
     summary_lines = [line for line in summary.splitlines() if line.strip()]
     if len(summary_lines) > MAX_SUMMARY_LINES:
         fail(f"summaryが{MAX_SUMMARY_LINES}行を超えている({len(summary_lines)}行)")
@@ -58,7 +67,13 @@ def main(argv):
     counterpoints = candidate.get("counterpoints")
     if not isinstance(counterpoints, list):
         fail("counterpointsが配列でない")
+    if len(counterpoints) > MAX_COUNTERPOINTS:
+        fail(f"counterpointsが{MAX_COUNTERPOINTS}件を超えている({len(counterpoints)}件)")
 
+    # reviewer軽微L2: AIが返した未知キーをそのまま最終JSONへ通さない。既知フィールドのみで
+    # 再構築する(将来フィールドを増やす際の暗黙の前提を無くす。既存のXSS経路は無いことは
+    # 確認済みだが、personal-dataに入るデータの形は本スキーマが正典であるべき)。
+    clean_counterpoints = []
     for i, cp in enumerate(counterpoints):
         if not isinstance(cp, dict):
             fail(f"counterpoints[{i}]がオブジェクトでない")
@@ -76,9 +91,16 @@ def main(argv):
         basis = cp.get("basis")
         if not isinstance(basis, list) or len(basis) < 1:
             fail(f"counterpoints[{i}].basisが空、または配列でない(1件以上必須)")
+        if len(basis) > MAX_BASIS_ITEMS:
+            fail(f"counterpoints[{i}].basisが{MAX_BASIS_ITEMS}件を超えている({len(basis)}件)")
         for j, b in enumerate(basis):
             if not isinstance(b, str) or not b.strip():
                 fail(f"counterpoints[{i}].basis[{j}]が空、または文字列でない")
+            if len(b) > MAX_BASIS_LEN:
+                fail(f"counterpoints[{i}].basis[{j}]が{MAX_BASIS_LEN}字を超えている({len(b)}字)")
+        clean_counterpoints.append(
+            {"tickerId": ticker_id, "stance": stance, "text": text, "basis": list(basis)}
+        )
 
     health = load_json_file(health_path, "health JSON")
     if not isinstance(health, dict):
@@ -100,7 +122,7 @@ def main(argv):
         "generated_by": "ai",
         "model": model,
         "summary": summary,
-        "counterpoints": counterpoints,
+        "counterpoints": clean_counterpoints,
         "health": {"sources": sources},
     }
     print(json.dumps(final, ensure_ascii=False, indent=2))

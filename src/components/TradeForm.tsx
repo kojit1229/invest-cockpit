@@ -184,13 +184,22 @@ export function TradeForm({ tickerId, side, currency, market, trades, defaultRis
           {entryNotAboveStop && (
             <p class="position-size-calc__error">stopはエントリーより下に</p>
           )}
-          {sizeResult && (
+          {/* reviewer軽微L5: 許容損失額 < 1単元あたり損失の場合、recommendPositionSizeは
+              qty:0, maxLoss:0を返す。以前は「推奨株数: 0株」+使えない「この株数を使う」
+              ボタンをそのまま出していた(design.mdにもこの空状態の規定が無かった)。
+              0株のときは専用の空状態文言に切り替え、無意味なボタンは出さない。 */}
+          {sizeResult && sizeResult.qty > 0 && (
             <p class="position-size-calc__result">
               推奨株数: {sizeResult.qty.toLocaleString()}株(この取引の最大損失{" "}
               {formatMoney(sizeResult.maxLoss, currency)})
               <button type="button" onClick={() => setQty(String(sizeResult.qty))}>
                 この株数を使う
               </button>
+            </p>
+          )}
+          {sizeResult && sizeResult.qty === 0 && (
+            <p class="position-size-calc__result position-size-calc__result--zero">
+              この許容損失額では{market === "JP" ? "1単元(100株)" : "1株"}も買えません
             </p>
           )}
           {combinedStopLoss !== null && (
