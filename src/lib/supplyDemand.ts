@@ -273,27 +273,26 @@ export async function loadSupplyDemandData(code: string): Promise<SupplyDemandRe
   return { buy, sell, errors };
 }
 
-export type SupplyDemandJudgment = "buy-dominant" | "sell-dominant" | "neutral" | "no-data";
+export type TaishakuJudgment = "buy-dominant" | "sell-dominant" | "unavailable";
 
-export const JUDGMENT_LABEL_JA: Record<SupplyDemandJudgment, string> = {
-  "buy-dominant": "買い優勢",
-  "sell-dominant": "売り優勢",
-  neutral: "中立",
-  "no-data": "データ不足",
+export const TAISHAKU_JUDGMENT_LABEL_JA: Record<TaishakuJudgment, string> = {
+  "buy-dominant": "買い長",
+  "sell-dominant": "売り長",
+  unavailable: "算出不可",
 };
 
 /**
- * 買い合計÷売り合計の倍率で単純判定する(既存needs需給ナビsignals.jsonは実在しないため常にこの経路、
- * docs/design.md (j)節)。>1.5買い優勢、<0.7売り優勢、それ以外は中立。0除算はbuy-dominant/no-dataに丸める。
+ * 貸借倍率 = 日証金融資残高(yushi_zan) ÷ 日証金貸株残高(kashikabu_zan)(標準指標)。
+ * ドーナツ全セグメント(JSDA貸付残高等)を合算した比率は、JSDA貸付残高という桁違いに大きい
+ * 機関貸株プールを分母に含むため大型株で常に極端な売り優勢に振れる問題があった(本番実測:
+ * トヨタで0.01倍)ため中央指標としては使わない(docs/design.md (j)節 2026-07-27修正)。
+ * 貸株残高が0または欠損(日証金ソース自体が取得不可、または対象コードが日証金データに無い)は
+ * 算出不可(0除算回避)。ratio===1.0ちょうど(実務上ほぼ発生しない)はsell-dominant側に丸める
+ * (仕様は>1.0/<1.0の2条件のみ明記しており、境界値の扱いはこの増分の実装判断)。
  */
-export function classifySupplyDemand(buyTotal: number, sellTotal: number): SupplyDemandJudgment {
-  if (buyTotal <= 0 && sellTotal <= 0) return "no-data";
-  if (sellTotal <= 0) return "buy-dominant";
-  if (buyTotal <= 0) return "sell-dominant";
-  const ratio = buyTotal / sellTotal;
-  if (ratio > 1.5) return "buy-dominant";
-  if (ratio < 0.7) return "sell-dominant";
-  return "neutral";
+export function classifyTaishakuRatio(yushiZan: number | null, kashikabuZan: number | null): TaishakuJudgment {
+  if (yushiZan === null || kashikabuZan === null || kashikabuZan <= 0) return "unavailable";
+  return yushiZan / kashikabuZan > 1.0 ? "buy-dominant" : "sell-dominant";
 }
 
 export function sumQty(segments: SupplyDemandSegment[]): number {

@@ -3,12 +3,12 @@
 // 買い合計・売り合計それぞれの全体に対する実比率で描く(この増分の実装判断、design.md参照)。
 
 import {
-  classifySupplyDemand,
+  classifyTaishakuRatio,
   diffArrow,
-  JUDGMENT_LABEL_JA,
   sumQty,
   SupplyDemandSegment,
   SupplyDemandSourceError,
+  TAISHAKU_JUDGMENT_LABEL_JA,
 } from "../lib/supplyDemand";
 
 interface Props {
@@ -97,9 +97,6 @@ function LegendRow({ segment, color }: { segment: SupplyDemandSegment; color: st
 
 /** 需給ドーナツ本体(SVG自前描画)+凡例+中央ラベル。銘柄カルテの需給セクションで使う。 */
 export function SupplyDemandDonut({ buy, sell, errors }: Props) {
-  const buyTotal = sumQty(buy);
-  const sellTotal = sumQty(sell);
-
   if (buy.length === 0 && sell.length === 0) {
     if (errors.length >= 3) {
       return <p class="empty-state empty-state--small">取得不可(ローカル機能は正常)</p>;
@@ -108,8 +105,15 @@ export function SupplyDemandDonut({ buy, sell, errors }: Props) {
   }
 
   const arcs = buildArcs(buy, sell);
-  const judgment = classifySupplyDemand(buyTotal, sellTotal);
-  const ratioText = sellTotal > 0 ? `信用倍率 ${(buyTotal / sellTotal).toFixed(2)}倍` : "信用倍率 —";
+  // 中央指標は貸借倍率(日証金融資残高÷貸株残高)。ドーナツのセグメント構成(JSDA・JPX含む)は
+  // 変更せず、中央の要約指標だけをこの2セグメントから算出する(docs/design.md (j)節 2026-07-27修正)。
+  const jsfBuy = buy.find((s) => s.key === "jsf_yushi") ?? null;
+  const jsfSell = sell.find((s) => s.key === "jsf_kashikabu") ?? null;
+  const judgment = classifyTaishakuRatio(jsfBuy?.qty ?? null, jsfSell?.qty ?? null);
+  const ratioText =
+    jsfBuy !== null && jsfSell !== null && jsfSell.qty > 0
+      ? `貸借倍率(日証金) ${(jsfBuy.qty / jsfSell.qty).toFixed(2)}倍`
+      : "貸借倍率(日証金) —";
 
   return (
     <div class="supply-demand-donut">
@@ -118,7 +122,7 @@ export function SupplyDemandDonut({ buy, sell, errors }: Props) {
           <path key={arc.key} d={arc.d} fill={arc.color} />
         ))}
         <text x={CENTER} y={CENTER - 6} text-anchor="middle" class="supply-demand-donut__center-label">
-          {JUDGMENT_LABEL_JA[judgment]}
+          {TAISHAKU_JUDGMENT_LABEL_JA[judgment]}
         </text>
         <text x={CENTER} y={CENTER + 14} text-anchor="middle" class="supply-demand-donut__center-ratio">
           {ratioText}
