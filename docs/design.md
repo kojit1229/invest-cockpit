@@ -74,6 +74,9 @@ sold(売却済)   --再エントリー検討--> candidate(候補)
 - **private側(`personal-data`リポジトリ、後続増分)**: 銘柄の共通ウォッチ状態、建玉、ストップ、投資仮説、判断ログ、採否ログ、AI生成物。(c)節の名前空間に集約する。
 - **第1増分時点の実データ所在**: localStorage(ブラウザ端末内)。これは技術的には「公開でも private でもない、端末ローカル」であり、GitHub Pagesの配信物には含まれない(ソースコードのみが配信される)。ただし端末間同期がないため、複数端末で使う場合は同一の状態が見えない制約がある。この制約はprivate repo同期(後続増分)で解消する。
 - GitHub Pagesの罠(`ai-linked-app-dev` Skill既知の原則): 「repoをprivateにすれば守られる」は誤り。本アプリの公開repoには最初から個人データを書き込む経路を作らない設計とする(ログイン画面も作らない。トークンゲート方式は private同期実装時に導入)。
+- **既知リスク: PATの同一オリジン共有**(reviewer中7): 増分4のfine-grained PAT(`invest_koro_token_v1`)はlocalStorageに平文保存する。`vite.config.ts`の`base: "/invest-cockpit/"`のとおり本アプリはproject pagesであり、オリジンは`https://kojit1229.github.io`で決算ナビ・需給ナビ・TaskChute Journal等と共有される(`src/lib/external.ts`が旧アプリのlocalStorageを読める根拠と表裏)。裏返せば、旧アプリ側のスクリプト(将来の外部ライブラリ導入含む)からこのブラウザ上でPATが読める。GitHub側での鍵の即時無効化はできる(パスワードに比べリスクは絞れる)が、「漏れない」ことを意味しない。設定画面(`SettingsPage.tsx`)の説明文にもこのリスクを明記する。設計変更(トークンの保存先分離等)は今は求めない。
+
+
 
 ## (e) 増分2の調査結果(旧アプリの外部連携。事実として確認済み)
 
@@ -143,7 +146,7 @@ interface Trade {
 - カルテ画面に建玉セクション(保有数量・平均単価・段数テーブル・損切りライン・到達時損失額。保有なしは「建玉なし」)と、「買いを記録」「売りを記録」ボタンを追加。ボタン押下で`TradeForm`(日付=今日デフォルト・数量・単価・stop任意・理由タグ複数選択)を開き、「記録する」で確定する。
 - 取引履歴一覧は新しい順(日付desc、同日はcreatedAt desc)。
 - 「今日」画面(`TodayQueue`)は`holding`グループの各行のうち建玉があるものだけ、保有数量・平均単価を1行サブ表示する(`TickerRow`の`position`prop)。
-- 金額表示は`src/lib/format.ts` `formatMoney`で通貨記号付き・整数丸めにする(丸めは表示直前のみ。内部計算は`number`のまま)。
+- 金額表示は`src/lib/format.ts` `formatMoney`で通貨記号付き、通貨別の桁数(JPY=整数0桁 / USD=小数点2桁)で丸める(丸めは表示直前のみ。内部計算は`number`のまま)。JPY一律整数丸めだと USD建て銘柄(例: NVDA $123.45 → $123)で実害が出るため通貨別に分けた(reviewer中8)。
 
 ## (g) 増分4: private repo同期(トークンゲート方式)
 
@@ -167,6 +170,11 @@ interface Trade {
 | true | true | `conflict`(競合ダイアログ) |
 
 `lastSyncedSha`/`lastSyncedModified`が未設定(一度も同期していない端末)の場合は常に「変更あり」とみなす。これにより、既存のリモートデータがある状態で新端末が初めてトークンを設定したときは無条件採用ではなく競合ダイアログに倒す(安全側)。
+
+**安全側の例外**(`src/lib/sync.ts` `pull`。reviewer中5・中12): 決定表が`in-sync`/`push-local`/`adopt-remote`と判定しても、以下の場合は自動処理をせず`conflict`(競合ダイアログ)に倒す。
+
+- ローカルが起動直後にlocalStorage破損から空状態へフォールバックした(`degraded`)状態で`in-sync`/`push-local`と判定された場合: 壊れた空stateでリモート正本を自動上書き、または同期基準点を壊れた値へ書き換える事故を防ぐ(呼び出し元は`src/lib/storage.ts` `loadState`の戻り値`degraded`を`src/app.tsx`が起動時pullにのみ伝える)。
+- リモート受信データの一部要素(`tickers`/`trades`)が寛容パースで破棄されていた場合に`adopt-remote`と判定された場合: 破棄件数を検知した上での無告知自動採用を避け、ユーザーに選ばせる。
 
 **pull(起動時・設定画面の「今すぐ同期」ボタン)**: `GET contents`でsha・内容を取得 → 404なら決定表を経由せずローカルをそのまま新規作成(`sha`無しPUT) → 200なら決定表で判定し、`in-sync`/`push-local`はそのまま処理してメタを更新、`adopt-remote`/`conflict`は取得済みのリモート内容を呼び出し側(`src/app.tsx`)へ返す。`adopt-remote`はダイアログなしで自動的にローカルへ適用し、`conflict`のみ`src/components/ConflictDialog.tsx`(「リモートを採用」/「この端末を採用」の2択)を表示する。
 
@@ -194,11 +202,11 @@ interface Trade {
 - `data/prices_meta.json`: `{ schema_version: 1, latest_price_date: "YYYY-MM-DD", generated_at: string, price_count: number }`。データ日付は`latest_price_date`をそのまま使う。
 - 本番URL: `/stock_supply_demand/data/prices_meta.json` / `/stock_supply_demand/data/prices/{code}.json`(ルート相対。開発環境では404が正常)。
 
-**fetchの失敗隔離**(`src/lib/pipeline.ts` `loadPipelineData`): 決算ナビ・需給ナビは別々に`fetchJson`(例外を投げずnullを返す)でfetchし、`Promise.all`で並行取得する。一方が失敗してももう一方の判定は生きる。需給ナビは銘柄ごとに`data/prices/{code}.json`を個別fetchするため、1銘柄の404が他銘柄の取得を妨げない。`prices_meta.json`が読めない場合は需給ナビ全体を取得失敗扱いにする(鮮度表示の基準がないため)。
+**fetchの失敗隔離**(`src/lib/pipeline.ts` `loadPipelineData`): 決算ナビ・需給ナビは別々に`fetchJson`(例外を投げずnullを返す)でfetchし、`Promise.all`で並行取得する。一方が失敗してももう一方の判定は生きる。需給ナビは銘柄ごとに`data/prices/{code}.json`を個別fetchするため、1銘柄の404が他銘柄の取得を妨げない。`prices_meta.json`が読めない場合は需給ナビ全体を取得失敗扱いにする(鮮度表示の基準がないため)。すべてのfetchに`{ cache: "no-cache" }`を指定する(reviewer中11): GitHub Pagesは`Cache-Control: max-age=600`を返すため未指定だと最大10分古いブラウザキャッシュを使いうる。判断キューは鮮度が命のため、決算ナビ本体(`repos/stock_analyze/frontend/app.js`)と同じ方針で毎回再検証させる。
 
 **イベント種別**(`src/lib/events.ts`。対象は状態が`candidate`/`watching`/`holding`のJP銘柄のみ。`sold`/`passed`は判断が済んだ銘柄として対象外とした、この増分の実装判断):
 - 決算接近(`detectEarningsEvents`): 決算発表予定日が今日から7日以内(当日含む、`daysBetween`が0〜7)。
-- 高値接近/更新(`detectHighEvents`。対象は候補/監視/保有すべて): 「最新値」(日次closeの末尾有効値、無ければ週次closeの末尾有効値)が週次3年高値(weekly.closeの最大値)の95%以上で「高値接近」、100%を超えたら「高値更新」。
+- 高値接近/更新(`detectHighEvents`。対象は候補/監視/保有すべて): 「最新値」(日次closeの末尾有効値、無ければ週次closeの末尾有効値)が週次3年高値(weekly.closeの最大値)の95%以上で「高値接近」、100%を超えたら「高値更新」。週次終値ベース(日中の真の高値ではない)であることをUIラベルで明示するため、表示文言は「3年高値(週足終値)」とする(`src/lib/events.ts`の`detail`文言・`TickerDetail.tsx`。reviewer中9)。
 - 損切り接近(`detectStopEvents`。対象は`holding`のみ): 建玉(`computePosition`)の`currentStop`に対し、最新値がstopの103%以下で「損切りライン接近」、stop未満で「損切りライン割れ」。
 - `buildJudgmentQueue`が3種を統合し、損切り→決算→高値→銘柄名の順で安定ソートする。
 
@@ -206,6 +214,6 @@ interface Trade {
 
 **UI**:
 - `TodayQueue`の先頭に`JudgmentQueue`セクション。イベント0件なら「今日judgmentが必要な変化はありません」。各カードは種別バッジ・銘柄名・根拠数値・データ日付・カルテへのリンク。下部に「出典: 決算ナビ(YYYY-MM-DD) / 需給ナビ(YYYY-MM-DD)」(取得中は「取得中…」、fetch失敗は「取得不可(ローカル機能は正常)」、7日超は「(古いデータ)」を付記)。
-- `TickerDetail`にも株価セクション(JP銘柄のみ)を追加: 最新株価・3年高値からの距離(または「高値更新中」)・保有時はstopまでの距離(%)。対象226銘柄に無い(またはJPでない)銘柄は「価格データなし(対象226銘柄外)」。
+- `TickerDetail`にも株価セクション(JP銘柄のみ)を追加: 最新株価・3年高値(週足終値)からの距離(または「高値更新中」)・保有時はstopまでの距離(%)。対象226銘柄に無い(またはJPでない)銘柄は「価格データなし(対象226銘柄外)」。
 
 **未実装・既知の制約**: US銘柄はそもそも価格・決算データソースの対象外(需給ナビ・決算ナビともJP専用のため、判断キュー・カルテ株価セクションともにJPのみ)。イベント判定は`candidate`/`watching`/`holding`限定(`sold`/`passed`はカルテの株価セクション自体は引き続き表示するが、判断キューには出ない)。

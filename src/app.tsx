@@ -36,7 +36,15 @@ function genTradeId(): string {
 }
 
 export function App() {
-  const [state, setState] = useState<AppStateV1>(() => loadState());
+  // reviewer中5: loadStateがlocalStorage破損から空状態へフォールバックした(degraded)場合、
+  // このrefで起動時pullへ伝え、自動push/自動採用を安全側(競合ダイアログ)に倒す。
+  // 起動時pullが一度完了すればfalseにリセットする(以降の編集は正規のユーザー操作のため)。
+  const degradedRef = useRef(false);
+  const [state, setState] = useState<AppStateV1>(() => {
+    const loaded = loadState();
+    degradedRef.current = loaded.degraded;
+    return loaded.state;
+  });
   const isFirstRender = useRef(true);
   const route = useHashRoute();
 
@@ -132,9 +140,15 @@ export function App() {
   useEffect(() => {
     if (!hasToken()) return;
     setSyncPhase("syncing");
-    pull(state)
-      .then((outcome) => applySyncOutcome(outcome, state))
+    pull(state, 0, { localDegraded: degradedRef.current })
+      .then((outcome) => {
+        // この起動時pull(成功・失敗いずれか)が一度完了すれば、以降のstateは正規のユーザー
+        // 操作によるものとして扱う(degradedガードは初回のみ)。
+        degradedRef.current = false;
+        applySyncOutcome(outcome, state);
+      })
       .catch((e: unknown) => {
+        degradedRef.current = false;
         setSyncPhase("error");
         setSyncError(e instanceof Error ? e.message : "同期エラー");
       });

@@ -49,6 +49,17 @@ function isValidTrade(v: unknown): v is Trade {
 }
 
 /**
+ * strict解析時、寛容フィルタで捨てた要素数を呼び出し側へ伝えるための出力先(reviewer中12)。
+ * `tickers`/`trades`の不正要素が同期受信データでサイレントに切り捨てられ、そのまま
+ * adopt-remoteでローカルへ適用・再pushされる事故を防ぐため、呼び出し側(src/lib/sync.ts)が
+ * 破棄件数を見て自動適用を止められるようにする。
+ */
+export interface ParseAppStateStats {
+  droppedTickers: number;
+  droppedTrades: number;
+}
+
+/**
  * 生JSON文字列から寛容パースでAppStateV1を得る(要素単位)。トップレベルが解析不能・非object・
  * 未知schema_versionの場合はnullを返す(呼び出し側がフォールバック方針を決める)。
  * ローカル(loadState)とprivate repo同期の受信データ(src/lib/sync.ts)の両方から使う共通パーサ。
@@ -62,8 +73,14 @@ function isValidTrade(v: unknown): v is Trade {
  * `schema_version: 1`のリモートデータで`tickers`が欠損しているケースを「意図的な空state」として
  * 誤って採用し、ローカルの全銘柄を消してしまう事故を防ぐ。ローカル読み込み(loadState)は
  * 従来どおり寛容フォールバックのまま維持するため、strictを渡さない。
+ *
+ * `opts.stats`(reviewer中12): 渡された場合、`tickers`/`trades`のうち`filter`で捨てた要素数を
+ * 書き込む。呼び出し側(sync.ts)はこれを見て「一部破棄された受信データ」を検知できる。
  */
-export function parseAppState(raw: string, opts?: { strict?: boolean }): AppStateV1 | null {
+export function parseAppState(
+  raw: string,
+  opts?: { strict?: boolean; stats?: ParseAppStateStats },
+): AppStateV1 | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (typeof parsed !== "object" || parsed === null) return null;
@@ -71,9 +88,15 @@ export function parseAppState(raw: string, opts?: { strict?: boolean }): AppStat
     // schema_versionが1以外(未知バージョン・欠損)は破損扱い。
     if (obj.schema_version !== 1) return null;
     if (opts?.strict && !Array.isArray(obj.tickers)) return null;
-    const tickers = Array.isArray(obj.tickers) ? obj.tickers.filter(isValidTicker) : [];
+    const rawTickers = Array.isArray(obj.tickers) ? obj.tickers : [];
+    const tickers = rawTickers.filter(isValidTicker);
     // tradesは増分3で追加した加算的フィールド。欠損(旧データ)は空配列として扱う。
-    const trades = Array.isArray(obj.trades) ? obj.trades.filter(isValidTrade) : [];
+    const rawTrades = Array.isArray(obj.trades) ? obj.trades : [];
+    const trades = rawTrades.filter(isValidTrade);
+    if (opts?.stats) {
+      opts.stats.droppedTickers = rawTickers.length - tickers.length;
+      opts.stats.droppedTrades = rawTrades.length - trades.length;
+    }
     // lastModifiedは増分4で追加した加算的フィールド。欠損(旧データ)は""として扱う。
     const lastModified = typeof obj.lastModified === "string" ? obj.lastModified : "";
     return { schema_version: 1, tickers, trades, lastModified };
@@ -82,15 +105,28 @@ export function parseAppState(raw: string, opts?: { strict?: boolean }): AppStat
   }
 }
 
+export interface LoadStateResult {
+  state: AppStateV1;
+  /**
+   * true: localStorageに値は存在したが破損・未知schema_versionで空状態にフォールバックした
+   * (reviewer中5)。この直後に同期(pull)が走ると、壊れた空stateがリモート正本を上書きしうる
+   * ため、呼び出し側(src/app.tsx)はこのフラグが立っている間、自動push/自動採用を安全側
+   * (競合ダイアログ)に倒すこと。localStorageにキー自体が無かった(新規端末)場合はfalse。
+   */
+  degraded: boolean;
+}
+
 /** localStorageから状態を読む。破損・欠損・未知schema_versionは空状態にフォールバックする(例外を投げない)。 */
-export function loadState(): AppStateV1 {
+export function loadState(): LoadStateResult {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return emptyState();
-    return parseAppState(raw) ?? emptyState();
+    if (!raw) return { state: emptyState(), degraded: false };
+    const parsed = parseAppState(raw);
+    if (parsed) return { state: parsed, degraded: false };
+    return { state: emptyState(), degraded: true };
   } catch {
     // 壊れたJSON等。既存データは触らず、アプリは空状態から動作を継続する。
-    return emptyState();
+    return { state: emptyState(), degraded: true };
   }
 }
 

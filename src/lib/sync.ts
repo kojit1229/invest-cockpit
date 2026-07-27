@@ -6,7 +6,7 @@
 // 中身に絶対に含めない。
 
 import { AppStateV1 } from "../types";
-import { parseAppState } from "./storage";
+import { parseAppState, ParseAppStateStats } from "./storage";
 import { nowStr } from "./date";
 
 const OWNER = "kojit1229";
@@ -49,6 +49,9 @@ export function setToken(token: string): void {
 export function clearToken(): void {
   try {
     window.localStorage.removeItem(TOKEN_KEY);
+    // 同期メタ(lastSyncedSha等)も一緒に消す(reviewer軽微16)。残したままだと、
+    // 別のトークン/別リポジトリを設定し直したときに古いshaを基準に同期判定してしまう。
+    window.localStorage.removeItem(SYNC_META_KEY);
   } catch {
     // 無視: 削除できなくてもアプリは継続する。
   }
@@ -176,7 +179,7 @@ function friendlyError(status: number): string {
 }
 
 type GetOutcome =
-  | { status: "ok"; sha: string; state: AppStateV1 }
+  | { status: "ok"; sha: string; state: AppStateV1; dropped: number }
   | { status: "not-found" }
   | { status: "error"; message: string };
 
@@ -211,9 +214,11 @@ async function rawGet(token: string): Promise<GetOutcome> {
     return { status: "error", message: "データのデコードに失敗しました" };
   }
   // strict: tickersが配列でない不正な同期データを空stateへ丸めず拒否する(Codex P2)。
-  const state = parseAppState(text, { strict: true });
+  // stats: 要素単位で寛容フィルタが捨てた件数(reviewer中12)。呼び出し側で自動採用の可否判定に使う。
+  const stats: ParseAppStateStats = { droppedTickers: 0, droppedTrades: 0 };
+  const state = parseAppState(text, { strict: true, stats });
   if (!state) return { status: "error", message: "リモートのデータ形式が不正です" };
-  return { status: "ok", sha: p.sha, state };
+  return { status: "ok", sha: p.sha, state, dropped: stats.droppedTickers + stats.droppedTrades };
 }
 
 type PutOutcome = { status: "ok"; sha: string } | { status: "conflict" } | { status: "error"; message: string };
@@ -269,8 +274,16 @@ const MAX_RECONCILE_ATTEMPTS = 2;
 /**
  * pull: GETしてローカルと突き合わせ、docs/design.md 増分4節の決定表どおりに扱う。
  * 起動時・設定画面の「今すぐ同期」ボタンから呼ぶ。
+ *
+ * `opts.localDegraded`(reviewer中5): 呼び出し元のstateがlocalStorage破損からの空フォールバック
+ * 直後である場合にtrueを渡す。決定表が`in-sync`/`push-local`(=自動処理)と判定しても、壊れた
+ * 空stateでリモート正本を上書きしうるため、自動処理をせず`conflict`(競合ダイアログ)に倒す。
  */
-export async function pull(state: AppStateV1, attempt = 0): Promise<SyncOutcome> {
+export async function pull(
+  state: AppStateV1,
+  attempt = 0,
+  opts?: { localDegraded?: boolean },
+): Promise<SyncOutcome> {
   const token = getToken();
   if (!token) return { kind: "no-token" };
 
@@ -278,7 +291,8 @@ export async function pull(state: AppStateV1, attempt = 0): Promise<SyncOutcome>
   if (remote.status === "error") return { kind: "error", message: remote.message };
 
   if (remote.status === "not-found") {
-    // リモートに未作成(初回同期)。ローカルをそのまま新規作成する。
+    // リモートに未作成(初回同期)。ローカルをそのまま新規作成する。degraded状態でも
+    // リモートに元々何も無いため上書きで失うデータは無く、そのまま新規作成してよい。
     const put = await rawPut(token, state, null);
     if (put.status === "ok") {
       setSyncMeta({ lastSyncedSha: put.sha, lastSyncedAt: nowStr(), lastSyncedModified: state.lastModified });
@@ -288,13 +302,27 @@ export async function pull(state: AppStateV1, attempt = 0): Promise<SyncOutcome>
       if (attempt >= MAX_RECONCILE_ATTEMPTS) {
         return { kind: "error", message: "同期の競合解決に失敗しました(時間を置いて再試行してください)" };
       }
-      return pull(state, attempt + 1);
+      return pull(state, attempt + 1, opts);
     }
     return { kind: "error", message: put.message };
   }
 
   const meta = getSyncMeta();
   const decision = decideSyncAction({ remoteSha: remote.sha, localModified: state.lastModified, meta });
+
+  // reviewer中5: ローカルが破損復旧直後(degraded)の場合、リモートに既存データがある状態での
+  // 自動in-sync/push-localは危険(壊れた空stateでリモート正本を上書き、または同期基準点を
+  // 壊れた値へ書き換えてしまいうる)。安全側で競合ダイアログに倒す(通信・上書きは行わない)。
+  if (opts?.localDegraded && (decision.kind === "in-sync" || decision.kind === "push-local")) {
+    return { kind: "conflict", remoteState: remote.state, sha: remote.sha };
+  }
+
+  // reviewer中12: リモート受信データの一部要素が寛容パースで破棄されていた場合、無告知の
+  // 自動採用(adopt-remote)はしない。競合ダイアログに回し、ユーザーに選ばせる
+  // (ダイアログのリモート側銘柄数は破棄後の件数を表示するため、件数の違いから気づける)。
+  if (decision.kind === "adopt-remote" && remote.dropped > 0) {
+    return { kind: "conflict", remoteState: remote.state, sha: remote.sha };
+  }
 
   switch (decision.kind) {
     case "in-sync":
@@ -310,7 +338,7 @@ export async function pull(state: AppStateV1, attempt = 0): Promise<SyncOutcome>
         if (attempt >= MAX_RECONCILE_ATTEMPTS) {
           return { kind: "error", message: "同期の競合解決に失敗しました(時間を置いて再試行してください)" };
         }
-        return pull(state, attempt + 1);
+        return pull(state, attempt + 1, opts);
       }
       return { kind: "error", message: put.message };
     }
