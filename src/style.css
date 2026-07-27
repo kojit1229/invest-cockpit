@@ -724,3 +724,44 @@ body {
 }
 
 .conflict-dialog p {
+  font-size: 0.85rem;
+  color: #444;
+  line-height: 1.6;
+  margin: 0 0 12px;
+}
+
+.conflict-dialog__meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0 0 16px;
+  font-size: 0.85rem;
+}
+
+.conflict-dialog__meta dt {
+  color: #666;
+}
+
+.conflict-dialog__meta dd {
+  margin: 0;
+}
+
+.conflict-dialog__actions {
+  display: flex;
+  gap: 10px;
+}
+
+.conflict-dialog__actions button {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: white;
+  font-size: 0.9rem;
+}
+
+.conflict-dialog__actions button:last-child {
+  background: #eee;
+  color: #333;
+}
