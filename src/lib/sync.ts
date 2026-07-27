@@ -188,3 +188,171 @@ async function rawGet(token: string): Promise<GetOutcome> {
   if (res.status === 404) return { status: "not-found" };
   if (!res.ok) return { status: "error", message: friendlyError(res.status) };
   let payload: unknown;
+  try {
+    payload = await res.json();
+  } catch {
+    return { status: "error", message: "応答の解析に失敗しました" };
+  }
+  if (typeof payload !== "object" || payload === null) {
+    return { status: "error", message: "想定外の応答形式です" };
+  }
+  const p = payload as Record<string, unknown>;
+  if (typeof p.content !== "string" || p.encoding !== "base64" || typeof p.sha !== "string") {
+    return { status: "error", message: "想定外の応答形式です" };
+  }
+  let text: string;
+  try {
+    text = fromBase64Utf8(p.content);
+  } catch {
+    return { status: "error", message: "データのデコードに失敗しました" };
+  }
+  const state = parseAppState(text);
+  if (!state) return { status: "error", message: "リモートのデータ形式が不正です" };
+  return { status: "ok", sha: p.sha, state };
+}
+
+type PutOutcome = { status: "ok"; sha: string } | { status: "conflict" } | { status: "error"; message: string };
+
+async function rawPut(token: string, state: AppStateV1, sha: string | null): Promise<PutOutcome> {
+  const body: Record<string, unknown> = {
+    message: `sync: invest-cockpit state ${state.lastModified || nowStr()}`,
+    content: toBase64Utf8(JSON.stringify(state, null, 2)),
+    branch: BRANCH,
+  };
+  if (sha) body.sha = sha;
+  let res: Response;
+  try {
+    res = await fetch(contentsUrl(), {
+      method: "PUT",
+      headers: githubHeaders(token),
+      body: JSON.stringify(body),
+    });
+  } catch {
+    return { status: "error", message: "ネットワークエラー(通信できませんでした)" };
+  }
+  // 409(sha不一致)・422(shaが必要/一致しない)はいずれもリモートが先に進んでいるサイン。
+  // 呼び出し側はpull()フローに回して自動で再判定する(docs/design.md 増分4節)。
+  if (res.status === 409 || res.status === 422) return { status: "conflict" };
+  if (!res.ok) return { status: "error", message: friendlyError(res.status) };
+  let payload: unknown;
+  try {
+    payload = await res.json();
+  } catch {
+    return { status: "error", message: "応答の解析に失敗しました" };
+  }
+  const newSha = (payload as Record<string, unknown> | null)?.content as Record<string, unknown> | undefined;
+  const sha2 = newSha && typeof newSha.sha === "string" ? newSha.sha : undefined;
+  if (!sha2) return { status: "error", message: "応答の解析に失敗しました" };
+  return { status: "ok", sha: sha2 };
+}
+
+// -----------------------------------------------------------------------
+// 上位オーケストレーション。app.tsxはこれらだけを呼ぶ。
+// -----------------------------------------------------------------------
+
+export type SyncOutcome =
+  | { kind: "no-token" }
+  | { kind: "in-sync" }
+  | { kind: "pushed" }
+  | { kind: "created" }
+  | { kind: "adopt-remote"; remoteState: AppStateV1; sha: string }
+  | { kind: "conflict"; remoteState: AppStateV1; sha: string }
+  | { kind: "error"; message: string };
+
+const MAX_RECONCILE_ATTEMPTS = 2;
+
+/**
+ * pull: GETしてローカルと突き合わせ、docs/design.md 増分4節の決定表どおりに扱う。
+ * 起動時・設定画面の「今すぐ同期」ボタンから呼ぶ。
+ */
+export async function pull(state: AppStateV1, attempt = 0): Promise<SyncOutcome> {
+  const token = getToken();
+  if (!token) return { kind: "no-token" };
+
+  const remote = await rawGet(token);
+  if (remote.status === "error") return { kind: "error", message: remote.message };
+
+  if (remote.status === "not-found") {
+    // リモートに未作成(初回同期)。ローカルをそのまま新規作成する。
+    const put = await rawPut(token, state, null);
+    if (put.status === "ok") {
+      setSyncMeta({ lastSyncedSha: put.sha, lastSyncedAt: nowStr(), lastSyncedModified: state.lastModified });
+      return { kind: "created" };
+    }
+    if (put.status === "conflict") {
+      if (attempt >= MAX_RECONCILE_ATTEMPTS) {
+        return { kind: "error", message: "同期の競合解決に失敗しました(時間を置いて再試行してください)" };
+      }
+      return pull(state, attempt + 1);
+    }
+    return { kind: "error", message: put.message };
+  }
+
+  const meta = getSyncMeta();
+  const decision = decideSyncAction({ remoteSha: remote.sha, localModified: state.lastModified, meta });
+
+  switch (decision.kind) {
+    case "in-sync":
+      setSyncMeta({ lastSyncedSha: remote.sha, lastSyncedAt: nowStr(), lastSyncedModified: state.lastModified });
+      return { kind: "in-sync" };
+    case "push-local": {
+      const put = await rawPut(token, state, remote.sha);
+      if (put.status === "ok") {
+        setSyncMeta({ lastSyncedSha: put.sha, lastSyncedAt: nowStr(), lastSyncedModified: state.lastModified });
+        return { kind: "pushed" };
+      }
+      if (put.status === "conflict") {
+        if (attempt >= MAX_RECONCILE_ATTEMPTS) {
+          return { kind: "error", message: "同期の競合解決に失敗しました(時間を置いて再試行してください)" };
+        }
+        return pull(state, attempt + 1);
+      }
+      return { kind: "error", message: put.message };
+    }
+    case "adopt-remote":
+      return { kind: "adopt-remote", remoteState: remote.state, sha: remote.sha };
+    case "conflict":
+      return { kind: "conflict", remoteState: remote.state, sha: remote.sha };
+  }
+}
+
+/**
+ * push: mutation後3秒デバウンスから呼ぶ。GETをはさまず、直近の既知shaでPUTする
+ * (docs/design.md 増分4節)。sha不一致(409/422)ならpull()に回して自動で再判定する。
+ */
+export async function push(state: AppStateV1): Promise<SyncOutcome> {
+  const token = getToken();
+  if (!token) return { kind: "no-token" };
+
+  const meta = getSyncMeta();
+  const put = await rawPut(token, state, meta.lastSyncedSha);
+  if (put.status === "ok") {
+    setSyncMeta({ lastSyncedSha: put.sha, lastSyncedAt: nowStr(), lastSyncedModified: state.lastModified });
+    return { kind: "pushed" };
+  }
+  if (put.status === "conflict") return pull(state);
+  return { kind: "error", message: put.message };
+}
+
+/** 競合ダイアログで「リモートを採用」を選んだ場合。ネットワーク通信は不要(既にGET済み)。 */
+export function resolveConflictAdoptRemote(remoteState: AppStateV1, sha: string): AppStateV1 {
+  setSyncMeta({ lastSyncedSha: sha, lastSyncedAt: nowStr(), lastSyncedModified: remoteState.lastModified });
+  return remoteState;
+}
+
+/** 競合ダイアログで「この端末を採用」を選んだ場合。取得済みのremote shaを使って強制PUTする。 */
+export async function resolveConflictKeepLocal(state: AppStateV1, remoteSha: string): Promise<SyncOutcome> {
+  const token = getToken();
+  if (!token) return { kind: "no-token" };
+  const put = await rawPut(token, state, remoteSha);
+  if (put.status === "ok") {
+    setSyncMeta({ lastSyncedSha: put.sha, lastSyncedAt: nowStr(), lastSyncedModified: state.lastModified });
+    return { kind: "pushed" };
+  }
+  // 選択中にさらにリモートが進んでいた(稀な競合の再発)。もう一度pullフローで判定し直す。
+  if (put.status === "conflict") return pull(state);
+  return { kind: "error", message: put.message };
+}
+
+// ヘッダーの同期インジケータ用の表示状態。
+export type SyncPhase = "unset" | "idle" | "syncing" | "synced" | "error";
