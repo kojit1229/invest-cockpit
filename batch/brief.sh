@@ -188,3 +188,83 @@ else
 {"kessan": true, "jukyu": true, "state": true}
 JSON
   cat >"$CANDIDATE_JSON" <<'JSON'
+{
+  "summary": "【DRY-RUN】検証用ダミーの市況総括です。",
+  "counterpoints": [
+    {
+      "tickerId": "JP:0000",
+      "stance": "確認事項",
+      "text": "【DRY-RUN】検証用ダミーの指摘です。",
+      "basis": ["【DRY-RUN】ダミーの根拠"]
+    }
+  ]
+}
+JSON
+  log "dry-run: ダミーhealth($HEALTH_JSON)とダミーcandidate($CANDIDATE_JSON)を生成した"
+fi
+
+# ---------- 検証(dry-run/実行共通。不正ならファイルを出さずexit 1) ----------
+if ! FINAL_JSON="$(python "$VALIDATE_PY" "$CANDIDATE_JSON" "$TODAY" "$HEALTH_JSON" "$BRIEF_MODEL")"; then
+  die "生成JSONの検証に失敗(詳細は上のログ参照)。ファイルは出さない"
+fi
+log "検証OK"
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  printf '%s\n' "$FINAL_JSON" >"$WORK_DIR/$OUT_NAME.dryrun"
+  log "dry-run完了: $WORK_DIR/$OUT_NAME.dryrun に検証済みJSONを書いた(personal-dataへは書かない)"
+  exit 0
+fi
+
+# ---------- 検証OK: personal-data/invest-cockpit/brief/ へ書く ----------
+printf '%s\n' "$FINAL_JSON" >"$OUT_PATH"
+log "ブリーフ生成完了: $OUT_PATH"
+
+# ---------- 保持 $KEEP_DAYS 日、古い分は同コミットでgit rm ----------
+(
+  cd "$PDATA/brief" || exit 1
+  files="$(ls -1 2>/dev/null | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.json$' | sort || true)"
+  if [ -n "$files" ]; then
+    total="$(printf '%s\n' "$files" | grep -c .)"
+    if [ "$total" -gt "$KEEP_DAYS" ]; then
+      to_delete="$(printf '%s\n' "$files" | head -n $((total - KEEP_DAYS)))"
+      while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        git -C "$PERSONAL_REPO" rm --quiet -- "$BRIEF_SUBDIR/$f" 2>/dev/null || rm -f "$f"
+        log "古いブリーフを削除(保持は直近${KEEP_DAYS}日分): $f"
+      done <<<"$to_delete"
+    fi
+  fi
+)
+
+# ---------- path限定push(二重防御): brief/以外の変更を検出したら中止する ----------
+# --untracked-files=all必須: 初回のように invest-cockpit/ 配下がまだ何も追跡されていない
+# 場合、既定の--porcelainは新規ディレクトリを "?? invest-cockpit/" と1行に畳んでしまい、
+# ファイル単位のpath判定(以下のgrep)を誤検知させる(2026-07-27 実行テストで発見)。
+CHANGED="$(git -C "$PERSONAL_REPO" status --porcelain --untracked-files=all)"
+if [ -z "$CHANGED" ]; then
+  log "個人データ側は変更なし。commitしない"
+  exit 0
+fi
+OUTSIDE="$(echo "$CHANGED" | awk '{print $2}' | grep -v "^${BRIEF_SUBDIR}/" || true)"
+if [ -n "$OUTSIDE" ]; then
+  die "invest-cockpit/brief/ 以外の変更を検出したためpushしない(ファイル自体は $OUT_PATH に保存済み): $OUTSIDE"
+fi
+
+git -C "$PERSONAL_REPO" add "$BRIEF_SUBDIR"
+if git -C "$PERSONAL_REPO" diff --cached --quiet; then
+  log "ステージ後に差分なし。commitしない"
+  exit 0
+fi
+if ! git -C "$PERSONAL_REPO" commit -m "$(cat <<EOF
+invest-koro-brief: $TODAY のAIブリーフを追加(自動生成)
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+EOF
+)" >"$WORK_DIR/commit.log" 2>&1; then
+  die "commit に失敗(ファイル自体は $OUT_PATH に保存済み、詳細: $WORK_DIR/commit.log)"
+fi
+if ! git -C "$PERSONAL_REPO" push >"$WORK_DIR/push.log" 2>&1; then
+  die "push に失敗(commit済み、詳細: $WORK_DIR/push.log)"
+fi
+
+log "brief.sh 完了: $(git -C "$PERSONAL_REPO" log --oneline -1)"
