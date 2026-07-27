@@ -6,8 +6,14 @@ interface Props {
   onImport: (candidates: ImportCandidate[]) => { imported: number; skipped: number };
 }
 
-function candidateKey(c: ImportCandidate): string {
-  return `${c.source}:${c.code}`;
+/**
+ * reviewer軽微15: `${source}:${code}`だけだと同一ソース内にコード重複がある場合にPreactの
+ * `key`が衝突し、片方のチェックボックス操作が両方に効いてしまう。ソース内の配列インデックスを
+ * 加えて一意にする(`sources`はマウント時に一度だけ読み込みstateへ固定するため、インデックスは
+ * 再レンダー間で安定する)。
+ */
+function candidateKey(c: ImportCandidate, index: number): string {
+  return `${c.source}:${index}:${c.code}`;
 }
 
 /**
@@ -19,7 +25,7 @@ export function ImportPage({ existingIds, onImport }: Props) {
   const [selected, setSelected] = useState<Set<string>>(() => {
     const s = new Set<string>();
     for (const src of sources) {
-      for (const c of src.candidates) s.add(candidateKey(c));
+      src.candidates.forEach((c, i) => s.add(candidateKey(c, i)));
     }
     return s;
   });
@@ -40,9 +46,9 @@ export function ImportPage({ existingIds, onImport }: Props) {
   function handleImport() {
     const chosen: ImportCandidate[] = [];
     for (const src of sources) {
-      for (const c of src.candidates) {
-        if (selected.has(candidateKey(c))) chosen.push(c);
-      }
+      src.candidates.forEach((c, i) => {
+        if (selected.has(candidateKey(c, i))) chosen.push(c);
+      });
     }
     setResult(onImport(chosen));
   }
@@ -72,8 +78,8 @@ export function ImportPage({ existingIds, onImport }: Props) {
             <p class="empty-state">見つかりません</p>
           ) : (
             <ul class="import-list">
-              {src.candidates.map((c) => {
-                const k = candidateKey(c);
+              {src.candidates.map((c, i) => {
+                const k = candidateKey(c, i);
                 const already = existingIds.has(c.id);
                 return (
                   <li class="import-list__item" key={k}>

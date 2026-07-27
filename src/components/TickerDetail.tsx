@@ -104,7 +104,9 @@ export function TickerDetail({ ticker, trades, onStatusChange, onAddTrade, onDel
                 <dd>
                   {formatMoney(latest.value, ticker.currency)}({latest.date})
                 </dd>
-                <dt>3年高値からの距離</dt>
+                {/* 「3年高値(週足終値)」(reviewer中9): 週足終値ベースの基準であり、日中の真の高値
+                    ではないことをラベルで明示する(docs/design.md 増分5節を同時改訂)。 */}
+                <dt>3年高値(週足終値)からの距離</dt>
                 <dd>
                   {ratio > 1
                     ? `高値更新中(3年高値 ${formatMoney(high, ticker.currency)})`
@@ -144,8 +146,13 @@ export function TickerDetail({ ticker, trades, onStatusChange, onAddTrade, onDel
               </dd>
               {position.stopLossAmount !== null && (
                 <>
-                  <dt>損切り到達時損失額</dt>
-                  <dd>{formatMoney(position.stopLossAmount, ticker.currency)}</dd>
+                  {/* reviewer軽微19: stopLossAmount = (avgPrice - currentStop) * qty は
+                      トレーリングストップ(currentStop > avgPrice、利益確定方向)だと負値になる。
+                      計算式自体はdocs/design.md 増分3節の契約どおりのため変更せず、表示側で
+                      符号に応じてラベルを切り替え、値は絶対値で見せる(「損失額 ¥-50,000」という
+                      矛盾表示を避ける)。 */}
+                  <dt>{position.stopLossAmount >= 0 ? "損切り到達時損失額" : "損切りライン到達時利益額(トレーリングストップ)"}</dt>
+                  <dd>{formatMoney(Math.abs(position.stopLossAmount), ticker.currency)}</dd>
                 </>
               )}
             </dl>

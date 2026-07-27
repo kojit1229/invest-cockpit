@@ -118,7 +118,10 @@ export function detectHighEvents(tickers: Ticker[], prices: Map<string, PriceSer
         tickerId: t.id,
         tickerName: t.name,
         label: "高値更新",
-        detail: `最新値 ${latest.value.toLocaleString()} が3年高値 ${high.toLocaleString()} を更新`,
+        // 「3年高値(週足終値)」(reviewer中9): weeklyHighは週足終値ベースで、日中の真の高値
+        // ではない(データソースにhigh系列が無いための技術的制約)。終値高値と実高値の差は
+        // 高値ブレイク順張りの判断に直結するため、ラベルで区別を明示する。
+        detail: `最新値 ${latest.value.toLocaleString()} が3年高値(週足終値) ${high.toLocaleString()} を更新`,
         dataDate: latest.date,
       });
     } else if (ratio >= 0.95) {
@@ -129,7 +132,7 @@ export function detectHighEvents(tickers: Ticker[], prices: Map<string, PriceSer
         tickerId: t.id,
         tickerName: t.name,
         label: "高値接近",
-        detail: `3年高値 ${high.toLocaleString()} まで残り${remaining.toFixed(1)}%(最新値 ${latest.value.toLocaleString()})`,
+        detail: `3年高値(週足終値) ${high.toLocaleString()} まで残り${remaining.toFixed(1)}%(最新値 ${latest.value.toLocaleString()})`,
         dataDate: latest.date,
       });
     }

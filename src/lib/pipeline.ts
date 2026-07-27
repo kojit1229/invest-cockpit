@@ -40,10 +40,15 @@ function jukyuPriceUrl(code: string): string {
   return `/stock_supply_demand/data/prices/${encodeURIComponent(code)}.json`;
 }
 
-/** fetch+JSON parseをまとめて例外にしない(ネットワークエラー・404・非JSON応答はnull)。 */
+/**
+ * fetch+JSON parseをまとめて例外にしない(ネットワークエラー・404・非JSON応答はnull)。
+ * `cache: "no-cache"`(reviewer中11): GitHub Pagesは`Cache-Control: max-age=600`を返すため
+ * 指定なしだと最大10分古いブラウザキャッシュを使いうる。判断キューは鮮度が命のため、
+ * 決算ナビ本体(`repos/stock_analyze/frontend/app.js`)と同じ方針で毎回再検証させる。
+ */
 async function fetchJson(url: string): Promise<unknown | null> {
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { cache: "no-cache" });
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -85,22 +90,24 @@ async function loadKessan(): Promise<{
   return { schedule, asOf, error: schedule === null };
 }
 
+/**
+ * weekly/dailyそれぞれの{dates, close}を検証する(reviewer軽微13)。配列であることだけでなく、
+ * 要素型(dates=string, close=number|null)と`dates`/`close`の長さ一致まで見る。長さが揃って
+ * いないと`lastNonNull`(events.ts)が`dates[i]`を無検査参照し`dataDate`が`undefined`になりうる。
+ */
+function isValidSeriesPart(v: unknown): v is { dates: string[]; close: (number | null)[] } {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  if (!Array.isArray(o.dates) || !Array.isArray(o.close)) return false;
+  if (o.dates.length !== o.close.length) return false;
+  return o.dates.every((d) => typeof d === "string") && o.close.every((c) => c === null || Number.isFinite(c));
+}
+
 function isValidPriceSeries(v: unknown, code: string): v is PriceSeries {
   if (typeof v !== "object" || v === null) return false;
   const o = v as Record<string, unknown>;
   if (o.code !== code) return false;
-  const w = o.weekly as Record<string, unknown> | undefined;
-  const d = o.daily as Record<string, unknown> | undefined;
-  return (
-    typeof w === "object" &&
-    w !== null &&
-    Array.isArray(w.dates) &&
-    Array.isArray(w.close) &&
-    typeof d === "object" &&
-    d !== null &&
-    Array.isArray(d.dates) &&
-    Array.isArray(d.close)
-  );
+  return isValidSeriesPart(o.weekly) && isValidSeriesPart(o.daily);
 }
 
 async function loadJukyuPrices(codes: string[]): Promise<{
@@ -113,7 +120,10 @@ async function loadJukyuPrices(codes: string[]): Promise<{
   let metaError = true;
   if (typeof metaRaw === "object" && metaRaw !== null) {
     const latest = (metaRaw as Record<string, unknown>).latest_price_date;
-    if (typeof latest === "string") {
+    // 書式まで検証する(reviewer軽微14): 型だけの検証だと不正書式が daysBetween で NaN になり、
+    // 「NaN > 7」が false になるため鮮度警告(古いデータ表示)が沈黙してしまう。
+    // 決算ナビ側(schedule.jsonのdate)は正規表現検証済みで、ここは非対称だった。
+    if (typeof latest === "string" && /^\d{4}-\d{2}-\d{2}$/.test(latest)) {
       asOf = latest;
       metaError = false;
     }

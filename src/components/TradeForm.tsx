@@ -83,7 +83,7 @@ export function TradeForm({ tickerId, side, onSubmit, onCancel }: Props) {
           数量
           <input
             type="number"
-            min="0"
+            min="1"
             step="1"
             value={qty}
             onInput={(e) => setQty((e.target as HTMLInputElement).value)}

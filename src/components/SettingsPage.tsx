@@ -47,8 +47,10 @@ export function SettingsPage({ syncPhase, syncError, onTokenChanged, onSyncNow }
         <h2>private repo同期</h2>
         <p class="settings-page__hint">
           fine-grained PAT(<code>personal-data</code> リポジトリの Contents 読み書き権限のみ)が必要です。
-          パスワードではなく権限を絞った専用の鍵なので、漏れてもその鍵だけを即座に無効化できます。
-          トークンを設定するまで同期機能は動きません(ローカルの記録・機能はそのまま使えます)。
+          パスワードではなく権限を絞った専用の鍵なので、GitHub側で漏れてもその鍵だけを即座に無効化できます。
+          ただし本アプリと同じ<code>kojit1229.github.io</code>上の他アプリからはこのブラウザのlocalStorageを
+          共有で読めるため、トークン自体はこのブラウザ上の他のスクリプトからは読める状態にあります
+          (docs/design.md (d)節)。トークンを設定するまで同期機能は動きません(ローカルの記録・機能はそのまま使えます)。
         </p>
         <p class="settings-page__status">
           現在の状態: <SyncIndicator phase={syncPhase} error={syncError} />
