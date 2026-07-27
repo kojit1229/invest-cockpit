@@ -40,6 +40,13 @@ export function App() {
   const isFirstRender = useRef(true);
   const route = useHashRoute();
 
+  // pull/push実行中(非同期)にローカル編集が入ったかどうかを判定するため、常に最新のstateを
+  // 参照できるref(Codex P1)。pull()呼び出し時点のstateスナップショットと比較する。
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
   // private repo同期(増分4)の表示状態。トークン未設定なら常にunset。
   const [syncPhase, setSyncPhase] = useState<SyncPhase>(() => (hasToken() ? "idle" : "unset"));
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -78,8 +85,14 @@ export function App() {
   const skipNextPushRef = useRef(false);
   const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /** pull/push/競合解決の結果をUI状態(state・syncPhase・conflict)へ反映する共通処理。 */
-  function applySyncOutcome(outcome: SyncOutcome) {
+  /**
+   * pull/push/競合解決の結果をUI状態(state・syncPhase・conflict)へ反映する共通処理。
+   * `requestState`は今回のpull/push呼び出しに渡した(=リクエスト開始時点の)stateスナップショット。
+   * 非同期処理中にユーザーがローカルを編集していれば`stateRef.current`(最新state)と食い違うため、
+   * "adopt-remote"を黙って適用せず競合ダイアログへ回し、進行中のローカル編集を消さないようにする
+   * (Codex P1)。
+   */
+  function applySyncOutcome(outcome: SyncOutcome, requestState: AppStateV1) {
     switch (outcome.kind) {
       case "no-token":
         setSyncPhase("unset");
@@ -92,6 +105,12 @@ export function App() {
         setSyncError(null);
         return;
       case "adopt-remote":
+        if (stateRef.current.lastModified !== requestState.lastModified) {
+          // pull実行中にローカルが変わった。remoteを無告知採用せず競合ダイアログへ回す。
+          setConflict({ remoteState: outcome.remoteState, sha: outcome.sha });
+          setSyncPhase("idle");
+          return;
+        }
         skipNextPushRef.current = true;
         setState(resolveConflictAdoptRemote(outcome.remoteState, outcome.sha));
         setSyncPhase("synced");
@@ -114,7 +133,7 @@ export function App() {
     if (!hasToken()) return;
     setSyncPhase("syncing");
     pull(state)
-      .then(applySyncOutcome)
+      .then((outcome) => applySyncOutcome(outcome, state))
       .catch((e: unknown) => {
         setSyncPhase("error");
         setSyncError(e instanceof Error ? e.message : "同期エラー");
@@ -141,7 +160,7 @@ export function App() {
     pushTimerRef.current = setTimeout(() => {
       setSyncPhase("syncing");
       push(state)
-        .then(applySyncOutcome)
+        .then((outcome) => applySyncOutcome(outcome, state))
         .catch((e: unknown) => {
           setSyncPhase("error");
           setSyncError(e instanceof Error ? e.message : "同期エラー");
@@ -158,7 +177,7 @@ export function App() {
     if (hasToken()) {
       setSyncPhase("syncing");
       pull(state)
-        .then(applySyncOutcome)
+        .then((outcome) => applySyncOutcome(outcome, state))
         .catch((e: unknown) => {
           setSyncPhase("error");
           setSyncError(e instanceof Error ? e.message : "同期エラー");
@@ -171,7 +190,7 @@ export function App() {
   function handleSyncNow() {
     setSyncPhase("syncing");
     pull(state)
-      .then(applySyncOutcome)
+      .then((outcome) => applySyncOutcome(outcome, state))
       .catch((e: unknown) => {
         setSyncPhase("error");
         setSyncError(e instanceof Error ? e.message : "同期エラー");
@@ -190,11 +209,12 @@ export function App() {
   function handleKeepLocal() {
     if (!conflict) return;
     const remoteSha = conflict.sha;
+    const requestState = state;
     setSyncPhase("syncing");
     resolveConflictKeepLocal(state, remoteSha)
       .then((outcome) => {
         setConflict(null);
-        applySyncOutcome(outcome);
+        applySyncOutcome(outcome, requestState);
       })
       .catch((e: unknown) => {
         setConflict(null);

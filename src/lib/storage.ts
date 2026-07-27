@@ -40,7 +40,7 @@ function isValidTrade(v: unknown): v is Trade {
     typeof t.price === "number" &&
     Number.isFinite(t.price) &&
     t.price >= 0 &&
-    (t.stop === undefined || (typeof t.stop === "number" && Number.isFinite(t.stop))) &&
+    (t.stop === undefined || (typeof t.stop === "number" && Number.isFinite(t.stop) && t.stop > 0)) &&
     Array.isArray(t.reasonTags) &&
     t.reasonTags.every((tag) => typeof tag === "string") &&
     (t.memo === undefined || typeof t.memo === "string") &&
@@ -56,14 +56,21 @@ function isValidTrade(v: unknown): v is Trade {
  * 空状態に丸めてしまうと同期取り込み側が「リモートは意図的に空になった」と誤認し、
  * ローカルの実データを上書きしかねない。そのため失敗はnullで明示し、空状態への
  * フォールバックはこの関数の外(loadStateのみ)で行う。
+ *
+ * `opts.strict`(Codex P2): 同期受信データ用の検証強化。`tickers`が配列でない(欠損・型不一致)
+ * 場合、通常は空配列へ寛容フォールバックするが、strictではnullを返し不正データとして拒否する。
+ * `schema_version: 1`のリモートデータで`tickers`が欠損しているケースを「意図的な空state」として
+ * 誤って採用し、ローカルの全銘柄を消してしまう事故を防ぐ。ローカル読み込み(loadState)は
+ * 従来どおり寛容フォールバックのまま維持するため、strictを渡さない。
  */
-export function parseAppState(raw: string): AppStateV1 | null {
+export function parseAppState(raw: string, opts?: { strict?: boolean }): AppStateV1 | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (typeof parsed !== "object" || parsed === null) return null;
     const obj = parsed as Record<string, unknown>;
     // schema_versionが1以外(未知バージョン・欠損)は破損扱い。
     if (obj.schema_version !== 1) return null;
+    if (opts?.strict && !Array.isArray(obj.tickers)) return null;
     const tickers = Array.isArray(obj.tickers) ? obj.tickers.filter(isValidTicker) : [];
     // tradesは増分3で追加した加算的フィールド。欠損(旧データ)は空配列として扱う。
     const trades = Array.isArray(obj.trades) ? obj.trades.filter(isValidTrade) : [];

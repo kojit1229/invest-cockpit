@@ -133,7 +133,11 @@ export function decideSyncAction(params: {
   const remoteChanged = meta.lastSyncedSha === null || remoteSha !== meta.lastSyncedSha;
   // lastSyncedModifiedが無い場合、ローカルは常に「同期基準点より新しい」として扱う
   // (安全側: 初回同期でリモートに既存データがあれば無条件採用ではなく競合ダイアログに倒す)。
-  const localChanged = meta.lastSyncedModified === null || localModified > meta.lastSyncedModified;
+  // 大小比較(>)ではなく不一致(!==)で判定する(Codex P1): 端末の時計逆行やタイムゾーン差で
+  // localModifiedがlastSyncedModifiedより「小さく」なる場合でも、値が変わっていれば変更ありと
+  // 検出できるようにする(大小比較だと実際の変更が無変更扱いになり、後続のadopt-remoteでローカル
+  // 編集を消しうる)。
+  const localChanged = meta.lastSyncedModified === null || localModified !== meta.lastSyncedModified;
 
   if (!remoteChanged && !localChanged) return { kind: "in-sync" };
   if (!remoteChanged && localChanged) return { kind: "push-local" };
@@ -206,7 +210,8 @@ async function rawGet(token: string): Promise<GetOutcome> {
   } catch {
     return { status: "error", message: "データのデコードに失敗しました" };
   }
-  const state = parseAppState(text);
+  // strict: tickersが配列でない不正な同期データを空stateへ丸めず拒否する(Codex P2)。
+  const state = parseAppState(text, { strict: true });
   if (!state) return { status: "error", message: "リモートのデータ形式が不正です" };
   return { status: "ok", sha: p.sha, state };
 }
