@@ -113,7 +113,11 @@ export function TickerDetail({ ticker, trades, onStatusChange, onAddTrade, onDel
                 {position.qty > 0 && position.currentStop !== null && (
                   <>
                     <dt>損切りラインまでの距離</dt>
-                    <dd>{(((latest.value - position.currentStop) / position.currentStop) * 100).toFixed(1)}%</dd>
+                    <dd>
+                      {position.currentStop > 0
+                        ? `${(((latest.value - position.currentStop) / position.currentStop) * 100).toFixed(1)}%`
+                        : "—"}
+                    </dd>
                   </>
                 )}
               </dl>

@@ -119,6 +119,13 @@ async function loadJukyuPrices(codes: string[]): Promise<{
     }
   }
 
+  // 鮮度の基準であるprices_meta.jsonが読めない場合は価格データを空で返す(Codex P2)。
+  // 個別のprices/{code}.jsonだけ取れても「出典の日付」(鮮度)が確立できないため、
+  // 鮮度不明の価格からイベント判定・カルテの株価表示を作らない。個別ファイルのfetch自体も行わない。
+  if (metaError) {
+    return { prices: new Map(), asOf, error: true };
+  }
+
   const prices = new Map<string, PriceSeries>();
   if (codes.length > 0) {
     const results = await Promise.all(
@@ -132,9 +139,7 @@ async function loadJukyuPrices(codes: string[]): Promise<{
     }
   }
 
-  // 鮮度の基準であるprices_meta.jsonが読めない場合はソース全体を失敗扱いにする
-  // (個別のprices/{code}.jsonだけ取れても「出典の日付」が表示できないため)。
-  return { prices, asOf, error: metaError };
+  return { prices, asOf, error: false };
 }
 
 /** 決算ナビ・需給ナビの公開JSONを読み、イベント判定の入力データを作る。jpCodesは市場プレフィックス無しのコード。 */

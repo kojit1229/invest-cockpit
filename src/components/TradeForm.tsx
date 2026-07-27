@@ -49,8 +49,8 @@ export function TradeForm({ tickerId, side, onSubmit, onCancel }: Props) {
     let stopNum: number | undefined;
     if (stop.trim() !== "") {
       stopNum = Number(stop);
-      if (!Number.isFinite(stopNum) || stopNum < 0) {
-        setError("損切りラインは0以上の数で入力してください");
+      if (!Number.isFinite(stopNum) || stopNum <= 0) {
+        setError("損切りラインは正の数で入力してください");
         return;
       }
     }
