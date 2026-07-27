@@ -1088,3 +1088,90 @@ body {
   background: #eee !important;
   color: #333 !important;
 }
+
+/* 増分8: 需給ドーナツ(売り圧vs買い圧) */
+
+.ticker-detail__supply-demand {
+  margin-top: 20px;
+  border-top: 2px solid var(--border);
+  padding-top: 16px;
+}
+
+.ticker-detail__supply-demand h2 {
+  font-size: 1rem;
+  margin: 0 0 8px;
+}
+
+.supply-demand-donut {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.supply-demand-donut svg {
+  max-width: 200px;
+  width: 100%;
+  height: auto;
+}
+
+.supply-demand-donut__center-label {
+  font-size: 13px;
+  font-weight: 700;
+  fill: #1a1a1a;
+}
+
+.supply-demand-donut__center-ratio {
+  font-size: 11px;
+  fill: #666;
+}
+
+.supply-demand-donut__legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.supply-demand-donut__legend-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.supply-demand-donut__swatch {
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  margin-top: 3px;
+}
+
+.supply-demand-donut__legend-main {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.82rem;
+}
+
+.supply-demand-donut__legend-label {
+  font-weight: 600;
+}
+
+.supply-demand-donut__legend-value {
+  color: #333;
+}
+
+.supply-demand-donut__legend-date {
+  color: #888;
+  font-size: 0.75rem;
+}
+
+.supply-demand-donut__errors {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #b03a2e;
+  text-align: center;
+}
