@@ -879,3 +879,212 @@ body {
 .price-info dd {
   margin: 0;
 }
+
+/* 増分7: ポジションサイズ計算機・見送りワンタップ */
+
+.position-size-calc {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #f5f8fc;
+}
+
+.position-size-calc__risk-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.position-size-calc__currency {
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.position-size-calc__risk-input input {
+  flex: 1;
+}
+
+.position-size-calc__error {
+  margin: 0;
+  color: #b00020;
+  font-size: 0.85rem;
+}
+
+.position-size-calc__result {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #1a1a1a;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.position-size-calc__result button {
+  padding: 4px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: white;
+  color: var(--accent);
+  font-size: 0.8rem;
+}
+
+.position-size-calc__combined {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.ticker-detail__status {
+  flex-wrap: wrap;
+}
+
+.ticker-detail__pass-btn {
+  margin-left: auto;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: white;
+  color: #555;
+  font-size: 0.8rem;
+}
+
+.judgment-queue__pass-btn {
+  margin-top: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: white;
+  color: #555;
+  font-size: 0.75rem;
+}
+
+.ticker-detail__pass-history {
+  margin-top: 24px;
+  border-top: 2px solid var(--border);
+  padding-top: 16px;
+}
+
+.ticker-detail__pass-history h2 {
+  font-size: 1rem;
+  margin: 0 0 8px;
+}
+
+.pass-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pass-history__item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pass-history__date {
+  color: #666;
+  font-size: 0.8rem;
+}
+
+.settings-page__risk {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  background: white;
+  margin-bottom: 16px;
+}
+
+.settings-page__risk h2 {
+  font-size: 1rem;
+  margin: 0 0 10px;
+}
+
+.pass-dialog__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 100;
+}
+
+.pass-dialog {
+  background: white;
+  border-radius: 10px;
+  padding: 18px;
+  max-width: 420px;
+  width: 100%;
+}
+
+.pass-dialog h2 {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+
+.pass-dialog__hint {
+  font-size: 0.85rem;
+  color: #666;
+  margin: 0 0 12px;
+}
+
+.pass-dialog__tags {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: 0 0 16px;
+}
+
+.pass-dialog__tags legend {
+  font-size: 0.8rem;
+  color: #666;
+  padding: 0 4px;
+}
+
+.pass-dialog__tag {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+
+.pass-dialog__actions {
+  display: flex;
+  gap: 10px;
+}
+
+.pass-dialog__actions button {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: white;
+  font-size: 0.9rem;
+}
+
+.pass-dialog__actions button:disabled {
+  opacity: 0.5;
+}
+
+.pass-dialog__cancel {
+  background: #eee !important;
+  color: #333 !important;
+}
