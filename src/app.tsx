@@ -7,6 +7,7 @@ import { ImportCandidate } from "./lib/external";
 import { computePosition } from "./lib/position";
 import { loadPipelineData, PipelineData } from "./lib/pipeline";
 import { buildJudgmentQueue } from "./lib/events";
+import { Brief, briefFeedbackTextPrefix, loadBrief } from "./lib/brief";
 import {
   hasToken,
   pull,
@@ -28,6 +29,9 @@ import { ReviewPage } from "./components/ReviewPage";
 
 /** append-onlyの見送り履歴の上限(増分7、docs/design.md 増分7節)。超過分は古いものから削除する。 */
 const MAX_PASSED_EVENTS = 20;
+
+/** append-onlyの引け後ブリーフ採否ログの上限(増分10、docs/design.md 増分10節)。古い順に削除する。 */
+const MAX_BRIEF_FEEDBACK = 50;
 
 /** private repo同期のデバウンス間隔(mutation後3秒。docs/design.md 増分4節)。 */
 const PUSH_DEBOUNCE_MS = 3000;
@@ -87,6 +91,22 @@ export function App() {
       cancelled = true;
     };
   }, [jpCodesKey]);
+
+  // 増分10: 引け後ブリーフ(personal-data、トークンゲート)。未取得(null)ならカード非表示。
+  // トークン未設定・全日程404・取得失敗もすべてnullに畳む(呼び出し元では区別しない、
+  // docs/design.md 増分10節「取得失敗してもアプリの他機能は無影響」)。マウント時に1回だけ取得する。
+  const [brief, setBrief] = useState<Brief | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    loadBrief(todayStr()).then((result) => {
+      if (cancelled) return;
+      setBrief(result.kind === "ok" ? result.brief : null);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const today = todayStr();
   const judgmentEvents = useMemo(
@@ -361,6 +381,46 @@ export function App() {
     setPassTarget(null);
   }
 
+  // 引け後ブリーフの採否ワンタップ(増分10): 「参考になった」/「却下」の記録。
+  // append-only、同一キー(date+tickerId+stance+textの先頭32字)の重複記録はしない
+  // (UI側はボタン無効化で二重送信を防ぐが、念のためここでも防御する)。
+  function handleBriefFeedback(input: {
+    date: string;
+    tickerId: string | null;
+    stance: string;
+    text: string;
+    verdict: "adopted" | "dismissed";
+  }) {
+    const now = nowStr();
+    const textPrefix = briefFeedbackTextPrefix(input.text);
+    setState((prev) => {
+      const existing = prev.briefFeedback ?? [];
+      const alreadyDecided = existing.some(
+        (f) =>
+          f.date === input.date &&
+          f.tickerId === input.tickerId &&
+          f.stance === input.stance &&
+          f.textPrefix === textPrefix,
+      );
+      if (alreadyDecided) return prev;
+      const appended = [
+        ...existing,
+        {
+          date: input.date,
+          tickerId: input.tickerId,
+          stance: input.stance,
+          verdict: input.verdict,
+          decidedAt: now,
+          textPrefix,
+        },
+      ];
+      // append-only上限50件。超過分は古いものから削除する(docs/design.md 増分10節)。
+      const briefFeedback =
+        appended.length > MAX_BRIEF_FEEDBACK ? appended.slice(appended.length - MAX_BRIEF_FEEDBACK) : appended;
+      return { ...prev, briefFeedback, lastModified: now };
+    });
+  }
+
   function handleSettingsChange(next: AppSettings) {
     const now = nowStr();
     setState((prev) => ({ ...prev, settings: next, lastModified: now }));
@@ -395,6 +455,9 @@ export function App() {
               pipelineLoading={pipeline === null}
               today={today}
               onOpenPass={handleOpenPass}
+              brief={brief}
+              briefFeedback={state.briefFeedback ?? []}
+              onBriefFeedback={handleBriefFeedback}
             />
             <AddTickerForm onAdd={handleAdd} />
             <a class="import-link" href="#/import">

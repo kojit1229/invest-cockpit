@@ -1,9 +1,11 @@
-import { STATUS_LABEL_JA, Ticker, TICKER_STATUSES, TickerStatus, Trade } from "../types";
+import { BriefFeedback, STATUS_LABEL_JA, Ticker, TICKER_STATUSES, TickerStatus, Trade } from "../types";
 import { TickerRow } from "./TickerRow";
 import { computePosition } from "../lib/position";
 import { JudgmentEvent } from "../lib/events";
 import { tickerHref } from "../lib/router";
 import { daysBetween } from "../lib/date";
+import { Brief } from "../lib/brief";
+import { BriefCard } from "./BriefCard";
 
 interface Props {
   tickers: Ticker[];
@@ -22,6 +24,16 @@ interface Props {
   today: string;
   /** 増分7: 判断キューの各カードから見送りワンタップの理由タグ選択ダイアログを開く。 */
   onOpenPass: (tickerId: string) => void;
+  /** 増分10: 引け後ブリーフ(未取得・トークン未設定・取得失敗ならnull=カード非表示)。 */
+  brief: Brief | null;
+  briefFeedback: BriefFeedback[];
+  onBriefFeedback: (input: {
+    date: string;
+    tickerId: string | null;
+    stance: string;
+    text: string;
+    verdict: "adopted" | "dismissed";
+  }) => void;
 }
 
 const STALE_THRESHOLD_DAYS = 7;
@@ -86,6 +98,13 @@ export function TodayQueue(props: Props) {
     return (
       <section class="today-queue">
         <JudgmentQueue {...props} />
+        <BriefCard
+          brief={props.brief}
+          today={props.today}
+          tickers={tickers}
+          briefFeedback={props.briefFeedback}
+          onDecide={props.onBriefFeedback}
+        />
         <p class="empty-state">
           登録された銘柄がありません。下のフォームから候補銘柄を追加してください。
         </p>
@@ -96,6 +115,13 @@ export function TodayQueue(props: Props) {
   return (
     <section class="today-queue">
       <JudgmentQueue {...props} />
+      <BriefCard
+        brief={props.brief}
+        today={props.today}
+        tickers={tickers}
+        briefFeedback={props.briefFeedback}
+        onDecide={props.onBriefFeedback}
+      />
       {TICKER_STATUSES.map((status) => {
         const group = tickers.filter((t) => t.status === status);
         return (
