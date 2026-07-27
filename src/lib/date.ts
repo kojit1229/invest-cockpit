@@ -40,3 +40,18 @@ export function daysBetween(a: string, b: string): number {
   const msPerDay = 24 * 60 * 60 * 1000;
   return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / msPerDay);
 }
+
+/**
+ * "YYYY-MM-DD"からn日前(nが負なら未来)の"YYYY-MM-DD"を返す。daysBetween同様、
+ * 文字列をそのままDateへ渡さずDate.UTC経由で計算する(増分8: 需給ドーナツの
+ * 前週比・前日比の比較対象日を推測するために使う。過去分ファイルの一覧を取得する
+ * 手段が無いため、休日でズレる可能性がある日付を推測して個別にfetchし、
+ * 404なら「比較データなし」にフォールバックする方式を前提とする)。
+ */
+export function subtractDays(dateStr: string, n: number): string {
+  const [y, m, d] = parseYmd(dateStr);
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const t = Date.UTC(y, m - 1, d) - n * msPerDay;
+  const dt = new Date(t);
+  return formatDateParts(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
+}

@@ -46,7 +46,7 @@ function jukyuPriceUrl(code: string): string {
  * 指定なしだと最大10分古いブラウザキャッシュを使いうる。判断キューは鮮度が命のため、
  * 決算ナビ本体(`repos/stock_analyze/frontend/app.js`)と同じ方針で毎回再検証させる。
  */
-async function fetchJson(url: string): Promise<unknown | null> {
+export async function fetchJson(url: string): Promise<unknown | null> {
   try {
     const res = await fetch(url, { cache: "no-cache" });
     if (!res.ok) return null;

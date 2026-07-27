@@ -244,3 +244,39 @@ interface Trade {
 - 導線は2箇所から同じダイアログ(`src/components/PassDialog.tsx`)を開く: (a) カルテ画面(`TickerDetail`)の状態セレクタ横「見送る」ボタン、(b) 今日の判断キュー(`TodayQueue`の`JudgmentQueue`)の各イベントカードの「見送る」ボタン。どちらも`onOpenPass(tickerId)`(`App.tsx`の状態`passTarget`)を呼び、ダイアログはタグを1つ以上選ばないと確定できない(学習ループの入力データになるため空タグを許さない)。
 - 確定(`handleConfirmPass`)で対象銘柄の`status`を`"passed"`にし、`passedEvents`へ`{ date: todayStr(), tags }`を追記する。append-onlyで上限20件、超過分は古いものから削除する(`MAX_PASSED_EVENTS`)。記録経路はこのワンタップのみに限定する(他の経路から`passedEvents`を書き換えない)。
 - カルテ画面に見送り履歴セクションを表示する(日付+タグ、`passedEvents`を反転した配列=最新順)。0件は「見送り記録はありません」。
+
+## (j) 増分8: 需給ドーナツ(売り圧vs買い圧)
+
+銘柄カルテの「株価」セクションの下(JP銘柄のみ)に、需給ナビの公開JSONから売り圧/買い圧をSVG自前描画のドーナツで可視化する。**保存はしない**(カルテを開くたびにその銘柄のコードだけを対象にfetchする。増分5の株価セクションと違い、全銘柄分の事前一括fetchはしない)。実装は`src/lib/supplyDemand.ts`(fetch+検証+集計の純関数)と`src/components/SupplyDemandDonut.tsx`(SVG描画+凡例)。
+
+**実データ監査結果(この増分の実装時点、2026-07-27に`repos/stock_supply_demand`のgh-pagesブランチ・collectorソース・既存監査メモを読んで確認した事実)**
+
+`repos/stock_supply_demand`の生成データは**mainブランチではなくgh-pagesブランチにのみ存在**(既存の増分5と同じ注意点)。本番URLは`kojit1229.github.io/stock_supply_demand/`配下のルート相対パス。
+
+1. **JSDA週次貸借(`collector/jsda_weekly.py`)**: `data/meta.json` = `{schema_version, latest_week, generated_at, issue_count, weekly_count}`(`latest_week`が最新報告日)。`data/weekly/{report_date}.json` = `{schema_version, report_date, source_files, issues}`で`issues`は銘柄コード(4-5桁、JSDA統一コード末尾0落とし済み)をキーとするマップ、各要素`{name, taishaku: {yutanpo?: M, mutanpo?: M}, shinki: {...}}`(`M = {lend_qty, lend_amt, own_qty, own_amt, ten_qty, ten_amt}`、単位は株/百万円)。**前週比列(元xlsxにはある)はこの収集コードが出力から落としている**ため、前週比は自前で前週ファイルとの差分計算が必要。
+2. **JPX機関投資家空売り残高報告(0.5%以上、`collector/jpx_short.py`)**: `data/short_meta.json` = `{schema_version, latest_short_date, generated_at}`。`data/short/{code先頭2桁}.json`(コード単位ではなく2桁シャード) = `{schema_version, issues: {code: {name, events: [{date, ratio, qty, seller}]}}}`。同一(銘柄,報告者)の連続日再掲パターン(既存監査メモ`audit-notes.md`)のため、現在有効な残高は「報告者ごとの最新event」を集約して算出する。**シャードファイルは該当2桁に該当銘柄が1件もない場合は生成されない**(`collector/jpx_short.py`の`shards.setdefault`はデータがある2桁のみ作る)ため、シャード404は「そのプレフィックスに空売り報告銘柄が無い」という正常系であり、エラー扱いにしない。
+3. **日証金日次貸借(`collector/jsf_taishaku.py`)**: `data/taishaku_meta.json` = `{schema_version, latest_apply_date, generated_at, snapshot_count}`。`data/taishaku/{apply_date}.json` = `{schema_version, apply_date, settle_date, report_type, issue_count, issues}`で`issues[code]` = `{name, yushi_zan(融資残高株数), kashikabu_zan(貸株残高株数), yushi_shin, yushi_hen, kashikabu_shin, kashikabu_hen, sashihiki_zan, seido_kai, seido_uri}`。`seido_kai`/`seido_uri`(制度信用・買/売残高株数)は**多くの銘柄でnull**(実測、2026-07-23確報の7203含む複数銘柄で確認)のため本カードでは使わない。時系列格納`taishaku_series/{2桁}.json`(design.md想定の増分14a)は**2026-07-27時点でgh-pagesに未生成**(snapshot 2件のみ)のため、前日比は直近2件のスナップショットを個別fetchして自前差分する方式にする。
+4. **既存`signals.json`は存在しない**(gh-pagesの`data/`配下を確認したが無い)。当初案の「バッジがあれば優先」は不成立のため、判定は倍率のみで行う。
+
+**セグメント割当と配色(赤=買い、緑=売り。moomoo慣習に合わせる確定方針の実装)**
+
+- 買い圧(赤、1セグメント): 「信用買い残(代理: 日証金融資残高)」= `taishaku/{date}.json`の`yushi_zan`。日証金の融資(証券金融会社が証券会社へ資金を貸す)は信用買いの決済原資であり、信用買い需要の直接の代理変数(`audit-shinyou.md`と符合)。
+- 売り圧(緑、3セグメント。濃淡3段階):
+  1. 「借株需要(代理: JSDA貸付残高)」= `weekly/{date}.json`の対象コードの`taishaku.yutanpo.lend_qty + taishaku.mutanpo.lend_qty`(欠損側は0扱い)。**「信用売り残」や「空売り残高」と言い切らない**: `stock_supply_demand`側の既存監査メモ(`audit-notes.md`)が「JSDA貸付残高は転貸ダブルカウントの可能性→借株需要の代理変数として表示(空売り残高そのものと言わない)」と既に方針化しており、本アプリの表示もこれを踏襲する。JSDA週次データの`借入残高(自己/転貸)`2フィールドは、投資家の買い需要とは異なる「貸借取引の原資調達」側の数値でありbuy/sellの代理指標として使う根拠が無いため、この増分では使わない(未使用フィールドとして意図的に除外)。
+  2. 「機関投資家空売り報告 合計」= `short/{2桁}.json`の対象コードの`events`を報告者ごとに最新1件へ集約し、`qty > 0`(まだ有効な報告)のものを合計。
+  3. 「信用売り残(代理: 日証金貸株残高)」= `taishaku/{date}.json`の`kashikabu_zan`。
+- 単位はすべて株数(金額列は使わない。JPX機関空売り報告に金額が無く単位を統一できないため)。
+- ドーナツの弧の長さは固定の左右半分割りではなく、**買い合計・売り合計それぞれの全体に対する実比率**で描く(不均衡がそのまま視覚化される。既存デザインは弧配分方式を明記していなかったため、この増分の実装判断として記載する)。
+
+**中央ラベル判定**(`classifySupplyDemand(buyTotal, sellTotal)`、純関数): `signals.json`バッジ優先は不成立のため常に倍率判定。買い残高÷売り残高合計の比率が1.5超で「買い優勢」、0.7未満で「売り優勢」、その間は「中立」。売り合計が0(買い合計>0)は「買い優勢」、両方0は「データ不足(判定不可)」に丸める(0除算回避)。
+
+**前週比/前日比の計算方法**(データ提供側に履歴一覧APIが無いため、日付を推測して個別fetchし404なら「比較データなし」):
+- JSDA週次・JPX機関空売り報告は**前週比**、日証金日次のみ**前日比**(確定方針どおり)。
+- JSDA: 前週ファイルの日付は`subtractDays(report_date, 7)`を最優先候補とし、祝日で前週が木曜にずれるケース(`audit-notes.md`既知)に備え`6`日前・`8`日前の順で追加候補を試す(`src/lib/date.ts` `subtractDays`)。最初に200で取れたものを比較対象にする。全滅なら`diff: null`(凡例の矢印なし)。
+- 日証金: `subtractDays(latest_apply_date, n)`を`n=1,2,3,4`の順で試し、最初に取れたスナップショットと比較する(週末・祝日をスキップする目的)。
+- JPX機関空売り報告: 追加fetchはせず、既に取得済みの`events`配列から「報告者ごとの直近1件のうちcutoff日(`subtractDays(latest_short_date, 7)`)以前のもの」を集約し比較対象にする(cutoff以前に報告が無い報告者は0扱い)。
+- 鮮度表示(`asOf`)は各セグメントが実際に参照した日付をそのまま出す(JSDAは`report_date`、日証金は`apply_date`、JPX空売り報告は集約元データの性質上`short_meta.json`の`latest_short_date`を鮮度ラベルとして使う。個々の報告者の最新報告日がそれより古い場合があり得る点は、比較窓の起点を`latest_short_date`基準に統一するための簡略化として扱う)。
+
+**エラー処理**(既存パターン踏襲。ソースごとに独立、`src/lib/supplyDemand.ts` `loadSupplyDemandData`):
+- 各ソースの「meta+最新データ本体」の取得に失敗した場合のみ、そのソースをエラー扱いにする(`errors`配列)。カルテ側の対象コードがそのソース内に存在しない(0件)ことはエラーではない(JSDA対象外銘柄・空売り報告が無い銘柄は通常のケース)。JPXのシャード404も上記の理由により通常ケース。
+- 3ソースすべてがエラー、かつセグメントが0件 → 「取得不可」。エラー0件でセグメントが0件 → 「需給データなし」。それ以外はドーナツを描画し、エラーになったソースだけ「取得不可: <ソース名>」を凡例末尾に注記する。
