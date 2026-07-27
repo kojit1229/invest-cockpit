@@ -4,7 +4,7 @@
 import { AppStateV1, STORAGE_KEY, Ticker, TickerStatus, TICKER_STATUSES, Trade } from "../types";
 
 function emptyState(): AppStateV1 {
-  return { schema_version: 1, tickers: [], trades: [] };
+  return { schema_version: 1, tickers: [], trades: [], lastModified: "" };
 }
 
 function isValidTicker(v: unknown): v is Ticker {
@@ -48,20 +48,39 @@ function isValidTrade(v: unknown): v is Trade {
   );
 }
 
+/**
+ * 生JSON文字列から寛容パースでAppStateV1を得る(要素単位)。トップレベルが解析不能・非object・
+ * 未知schema_versionの場合はnullを返す(呼び出し側がフォールバック方針を決める)。
+ * ローカル(loadState)とprivate repo同期の受信データ(src/lib/sync.ts)の両方から使う共通パーサ。
+ * 重要: ローカル読み込みは「壊れていたら空状態」で安全だが、同期の受信データをここで
+ * 空状態に丸めてしまうと同期取り込み側が「リモートは意図的に空になった」と誤認し、
+ * ローカルの実データを上書きしかねない。そのため失敗はnullで明示し、空状態への
+ * フォールバックはこの関数の外(loadStateのみ)で行う。
+ */
+export function parseAppState(raw: string): AppStateV1 | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const obj = parsed as Record<string, unknown>;
+    // schema_versionが1以外(未知バージョン・欠損)は破損扱い。
+    if (obj.schema_version !== 1) return null;
+    const tickers = Array.isArray(obj.tickers) ? obj.tickers.filter(isValidTicker) : [];
+    // tradesは増分3で追加した加算的フィールド。欠損(旧データ)は空配列として扱う。
+    const trades = Array.isArray(obj.trades) ? obj.trades.filter(isValidTrade) : [];
+    // lastModifiedは増分4で追加した加算的フィールド。欠損(旧データ)は""として扱う。
+    const lastModified = typeof obj.lastModified === "string" ? obj.lastModified : "";
+    return { schema_version: 1, tickers, trades, lastModified };
+  } catch {
+    return null;
+  }
+}
+
 /** localStorageから状態を読む。破損・欠損・未知schema_versionは空状態にフォールバックする(例外を投げない)。 */
 export function loadState(): AppStateV1 {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptyState();
-    const parsed = JSON.parse(raw) as unknown;
-    if (typeof parsed !== "object" || parsed === null) return emptyState();
-    const obj = parsed as Record<string, unknown>;
-    // schema_versionが1以外(未知バージョン・欠損)は破損扱いとしてフォールバックする。
-    if (obj.schema_version !== 1) return emptyState();
-    const tickers = Array.isArray(obj.tickers) ? obj.tickers.filter(isValidTicker) : [];
-    // tradesは増分3で追加した加算的フィールド。欠損(旧データ)は空配列として扱う。
-    const trades = Array.isArray(obj.trades) ? obj.trades.filter(isValidTrade) : [];
-    return { schema_version: 1, tickers, trades };
+    return parseAppState(raw) ?? emptyState();
   } catch {
     // 壊れたJSON等。既存データは触らず、アプリは空状態から動作を継続する。
     return emptyState();

@@ -53,7 +53,7 @@ sold(売却済)   --再エントリー検討--> candidate(候補)
 - 冪等性: `id`が銘柄の一意キー。同一`id`の追加はエラーメッセージを返し拒否する(`src/app.tsx` `handleAdd`)。
 - この増分はlocalStorageのみが正本。端末間同期はない(次節(c)で後続増分の設計方針のみ示す)。
 
-## (c) private側名前空間案(後続増分・未実装)
+## (c) private側名前空間案(増分4で `state.json` 部分は実装済み。詳細は(g)節)
 
 第1弾のmust全体(取引下書き・private repo双方向同期)はこの増分に含まれない。以下は後続増分がそのまま使えるよう、統合提言(§4アーキテクチャ)に沿って先に固定しておく設計案。
 
@@ -65,8 +65,8 @@ sold(売却済)   --再エントリー検討--> candidate(候補)
   - `source`: データの出典(例: `"invest-agent"` `"kessan-navi"` `"manual"`)。
   - `generated_by`: `"deterministic" | "ai"`。AI生成物か決定論生成物かをアプリ側で常に区別表示できるようにする。
   - 冪等キー: 銘柄IDと`as_of`の組み合わせ(例: `"JP:7203#2026-07-27"`)。同キーの再生成は上書きとし重複を作らない。
-- 個人状態(共通ウォッチ状態・建玉・ストップ・判断ログ・AI提案の採否)は将来的にこの名前空間の別ファイル(例: `invest-cockpit/state.json`)へ正本を移す想定。fine-grained PATでアプリからGitHub API経由の双方向同期を行う(taskchute-ipadの同期パターンを踏襲)。
-- この増分では上記は**設計のみ**で実装しない。localStorageからの移行手順(一回限りインポート)は実装増分で別途定義する。
+- 個人状態(共通ウォッチ状態・建玉・ストップ・判断ログ・AI提案の採否)は`invest-cockpit/state.json`へ正本を移す想定。fine-grained PATでアプリからGitHub API経由の双方向同期を行う(taskchute-ipadの同期パターンを踏襲)。**増分4でこの`state.json`同期を実装した(詳細は(g)節)。** `invest-cockpit/inbox/YYYY-MM-DD.json`の日次inboxパターンは引き続き未実装(設計のみ)。
+- localStorageからの移行は行わない: 増分4の同期は「localStorageの`AppStateV1`をそのまま`state.json`として全量置換で同期する」方式のため、別スキーマへの変換・移行手順は不要だった。
 
 ## (d) 公開/private データ境界
 
@@ -143,3 +143,36 @@ interface Trade {
 - 取引履歴一覧は新しい順(日付desc、同日はcreatedAt desc)。
 - 「今日」画面(`TodayQueue`)は`holding`グループの各行のうち建玉があるものだけ、保有数量・平均単価を1行サブ表示する(`TickerRow`の`position`prop)。
 - 金額表示は`src/lib/format.ts` `formatMoney`で通貨記号付き・整数丸めにする(丸めは表示直前のみ。内部計算は`number`のまま)。
+
+## (g) 増分4: private repo同期(トークンゲート方式)
+
+(c)節の設計方針に沿って、`AppStateV1`全体を`personal-data`リポジトリの`invest-cockpit/state.json`へGitHub Contents API経由で双方向同期する。フィールドマージはせず**全量置換**。実装は`src/lib/sync.ts`(API層+同期ロジック)。
+
+**同期先(固定・変更不可)**: `kojit1229/personal-data`リポジトリ、パス`invest-cockpit/state.json`、ブランチ`main`。通信先は`api.github.com`のみ。
+
+**トークンゲート**: 設定画面(`#/settings`、`src/components/SettingsPage.tsx`)でfine-grained PAT(`personal-data`のContents読み書き権限のみ)を入力し、localStorageキー`invest_koro_token_v1`に平文保存する(`src/lib/sync.ts` `getToken`/`setToken`/`clearToken`)。**トークン未設定なら同期関連の関数(`pull`/`push`/競合解決)はすべて即座に`{ kind: "no-token" }`を返し、`fetch`を一切呼ばない**(mutation後のデバウンスpushもスケジュール自体をスキップする、`src/app.tsx`)。トークンをconsole・エラーメッセージ・`state.json`の中身に含めることはしない(`src/lib/sync.ts` `friendlyError`はHTTPステータスコードのみから文言を組み立てる)。
+
+**`AppStateV1.lastModified`(増分3までのスキーマに加算)**: 全mutation時にローカル時刻文字列(`src/lib/date.ts` `nowStr()`形式)で更新する。`src/lib/storage.ts` `parseAppState`が旧データ(欠損)を`""`にフォールバックする。この値が新旧判定の基準。
+
+**同期メタ(localStorageキー`invest_koro_sync_v1`)**: `{ lastSyncedSha, lastSyncedAt, lastSyncedModified }`。前回同期が取れた時点のリモートshaとローカル`lastModified`を保持する(`src/lib/sync.ts` `getSyncMeta`/内部の`setSyncMeta`)。
+
+**決定表(`decideSyncAction`、純関数)**: `remoteChanged = meta.lastSyncedSha === null || remoteSha !== meta.lastSyncedSha`、`localChanged = meta.lastSyncedModified === null || localModified > meta.lastSyncedModified`として、
+
+| remoteChanged | localChanged | 結果 |
+|---|---|---|
+| false | false | `in-sync`(何もしない) |
+| false | true | `push-local`(ローカルが先行。自動push) |
+| true | false | `adopt-remote`(リモートが先行。自動でローカルへ取り込み) |
+| true | true | `conflict`(競合ダイアログ) |
+
+`lastSyncedSha`/`lastSyncedModified`が未設定(一度も同期していない端末)の場合は常に「変更あり」とみなす。これにより、既存のリモートデータがある状態で新端末が初めてトークンを設定したときは無条件採用ではなく競合ダイアログに倒す(安全側)。
+
+**pull(起動時・設定画面の「今すぐ同期」ボタン)**: `GET contents`でsha・内容を取得 → 404なら決定表を経由せずローカルをそのまま新規作成(`sha`無しPUT) → 200なら決定表で判定し、`in-sync`/`push-local`はそのまま処理してメタを更新、`adopt-remote`/`conflict`は取得済みのリモート内容を呼び出し側(`src/app.tsx`)へ返す。`adopt-remote`はダイアログなしで自動的にローカルへ適用し、`conflict`のみ`src/components/ConflictDialog.tsx`(「リモートを採用」/「この端末を採用」の2択)を表示する。
+
+**push(mutation後3秒デバウンス・`src/app.tsx`のuseEffect)**: GETを挟まず、`meta.lastSyncedSha`を使って直接`PUT contents`する(pullより通信量が少ない)。GitHubが409または422(sha不一致)を返した場合は自動的に`pull`フローへフォールバックして再判定する。
+
+**UTF-8 base64**: `toBase64Utf8`/`fromBase64Utf8`(`src/lib/sync.ts`)は`TextEncoder`/`TextDecoder`を経由し、`btoa`/`atob`の素の呼び出しによるマルチバイト文字破壊を避ける(taskchute-ipadの既存パターンを踏襲)。
+
+**ヘッダー同期インジケータ(`src/components/SyncIndicator.tsx`)**: `unset`(未設定・グレー)/ `idle`(未同期・グレー)/ `syncing`(送信中)/ `synced`(同期済・緑)/ `error`(エラー・赤+短文)の5状態。エラー時もアプリのローカル機能(追加・状態変更・取引記録等)はすべて生き続ける(決定論のローカル保存が正規経路であり、同期はその上に乗る付加機能という位置づけ)。
+
+**未実装・既知の制約**: (c)節の日次inboxパターン(`invest-cockpit/inbox/YYYY-MM-DD.json`)は引き続き未実装。競合解決の再帰リトライ(sha不一致の再発)は最大2回まで(`MAX_RECONCILE_ATTEMPTS`)。

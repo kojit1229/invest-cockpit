@@ -86,11 +86,16 @@ export type TradeInput = Omit<Trade, "id" | "createdAt">;
  * localStorageキー `invest_koro_state_v1` に保存する値の形。
  * `trades` は増分3で追加した加算的フィールド(schema_versionは1のまま)。
  * 旧データ(trades欠損)は空配列として扱う(src/lib/storage.ts loadState)。
+ * `lastModified` は増分4で追加した加算的フィールド。全mutation時に更新するローカル時刻文字列
+ * (`src/lib/date.ts` `nowStr()`形式)で、private repo同期の新旧判定に使う
+ * (docs/design.md 増分4節)。旧データ(欠損)は""として扱う(loadStateで正規化するため、
+ * アプリ内で生きているAppStateV1は常に文字列を持つ)。
  */
 export interface AppStateV1 {
   schema_version: 1;
   tickers: Ticker[];
   trades?: Trade[];
+  lastModified: string;
 }
 
 export const STORAGE_KEY = "invest_koro_state_v1";

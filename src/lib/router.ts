@@ -1,5 +1,6 @@
-// ハッシュルーティング(増分2)。ライブラリは使わず自前実装。
-// ルート一覧: "#/" = 今日画面 / "#/ticker/<id>" = 銘柄カルテ / "#/import" = インポート画面
+// ハッシュルーティング(増分2、増分4で#/settingsを追加)。ライブラリは使わず自前実装。
+// ルート一覧: "#/" = 今日画面 / "#/ticker/<id>" = 銘柄カルテ / "#/import" = インポート画面 /
+// "#/settings" = 設定画面(private repo同期のトークン設定)
 // 未知のハッシュは今日画面にフォールバックする(アプリを落とさない)。
 
 import { useEffect, useState } from "preact/hooks";
@@ -7,12 +8,14 @@ import { useEffect, useState } from "preact/hooks";
 export type Route =
   | { name: "today" }
   | { name: "ticker"; id: string }
-  | { name: "import" };
+  | { name: "import" }
+  | { name: "settings" };
 
 export function parseHash(hash: string): Route {
   const path = hash.replace(/^#\/?/, "");
   if (path === "" || path === "/") return { name: "today" };
   if (path === "import") return { name: "import" };
+  if (path === "settings") return { name: "settings" };
   const m = /^ticker\/(.+)$/.exec(path);
   if (m) return { name: "ticker", id: decodeURIComponent(m[1]) };
   return { name: "today" };
