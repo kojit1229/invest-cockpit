@@ -195,7 +195,15 @@ export function TradeForm({ tickerId, side, currency, market, trades, defaultRis
           )}
           {combinedStopLoss !== null && (
             <p class="position-size-calc__combined">
-              現在の建玉全体でstopに到達した場合の合計損失: {formatMoney(Math.abs(combinedStopLoss), currency)}
+              {/* reviewer中2: combinedStopLossはTickerDetail.tsxのstopLossAmountと同じ計算式
+                  ((avgPrice - currentStop) * qty)のため、トレーリングストップ(stopを平均取得
+                  単価より上へ引き上げた場合)で負値になる。以前はここで常に「合計損失」と
+                  表記したままMath.absで符号を潰しており、利益が出る位置にstopを置いた
+                  ケースで「合計損失: ¥120,000」という嘘の表示になっていた。TickerDetail.tsxと
+                  同じく符号に応じてラベルを切り替える(値は絶対値のまま表示)。 */}
+              現在の建玉全体でstopに到達した場合の
+              {combinedStopLoss >= 0 ? "合計損失" : "到達時利益額(トレーリングストップ)"}:{" "}
+              {formatMoney(Math.abs(combinedStopLoss), currency)}
             </p>
           )}
         </div>

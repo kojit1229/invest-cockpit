@@ -62,6 +62,11 @@ function CurrencySummaryCard({ summary }: { summary: CurrencySummary }) {
           </dd>
         </dl>
       )}
+      {summary.mismatchedCount > 0 && (
+        <p class="review-summary-card__note review-summary-card__note--warning">
+          数量不整合(保有数量を超える売り)のラウンドが{summary.mismatchedCount}件あり、上記集計から除外しています。ラウンド一覧で確認してください。
+        </p>
+      )}
     </div>
   );
 }
@@ -101,6 +106,7 @@ function RoundListTable({ rounds }: { rounds: ClosedRound[] }) {
           <th>損益</th>
           <th>R倍数</th>
           <th>理由タグ</th>
+          <th>警告</th>
         </tr>
       </thead>
       <tbody>
@@ -118,6 +124,13 @@ function RoundListTable({ rounds }: { rounds: ClosedRound[] }) {
             </td>
             <td>{formatR(r.r)}</td>
             <td>{r.reasonTags.length > 0 ? r.reasonTags.join(" / ") : "—"}</td>
+            <td>
+              {r.qtyMismatched && (
+                <span class="review-round-table__warning-badge" title="保有数量を超える売りがあり、上記サマリの集計から除外しています">
+                  数量不整合
+                </span>
+              )}
+            </td>
           </tr>
         ))}
       </tbody>

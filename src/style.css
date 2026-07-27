@@ -1229,6 +1229,11 @@ body {
   font-size: 0.75rem;
 }
 
+.review-summary-card__note--warning {
+  color: #a3241f;
+  margin-top: 8px;
+}
+
 .review-page__section {
   margin-top: 24px;
   border-top: 2px solid var(--border);
@@ -1270,6 +1275,16 @@ body {
 
 .review-round-table__pnl--loss {
   color: #a3241f;
+}
+
+.review-round-table__warning-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #f8e5e3;
+  color: #a3241f;
+  font-size: 0.72rem;
+  white-space: nowrap;
 }
 
 /* 増分10: 引け後ブリーフカード(今日画面の判断キュー直下) */

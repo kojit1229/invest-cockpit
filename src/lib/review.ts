@@ -30,6 +30,13 @@ export interface ClosedRound {
    * 買いtradeが2件以上(ピラミッディングした)ラウンドのみ算出。それ以外はnull。
    */
   pyramidContribution: number | null;
+  /**
+   * 保有数量を超える売り(フラット時の単独売り含む)があったラウンドか(Codex P2 + reviewer中3。
+   * `position.ts` `splitRounds`が導出)。trueの場合、このラウンドの`pnl`・`r`・`pyramidContribution`は
+   * `summarizeByCurrency`のPF・勝率・R・増し玉寄与の集計から除外される。ラウンド一覧表には
+   * 残し、警告タグを表示する(黙って架空の損益を計上しない)。
+   */
+  qtyMismatched: boolean;
 }
 
 function uniqueReasonTags(trades: Trade[]): string[] {
@@ -96,6 +103,7 @@ function buildClosedRoundsForTicker(ticker: Ticker, allTrades: Trade[]): ClosedR
       r,
       reasonTags: uniqueReasonTags(trades),
       pyramidContribution,
+      qtyMismatched: round.qtyMismatched,
     };
   });
 }
@@ -125,11 +133,22 @@ export interface CurrencySummary {
   pyramidRoundCount: number;
   /** ピラミッディングしたラウンドの増し玉寄与の合計。対象0件ならnull。 */
   pyramidContributionTotal: number | null;
+  /**
+   * 数量不整合(保有数量を超える売り)のため集計から除外したラウンド数(Codex P2 + reviewer中3)。
+   * `closedRoundCount`以下の各集計値にはこの件数分のラウンドを含めていない。
+   */
+  mismatchedCount: number;
 }
 
-/** 指定通貨のラウンドだけを集計してサマリを作る(通貨は混ぜない。docs/design.md 増分9節)。 */
+/**
+ * 指定通貨のラウンドだけを集計してサマリを作る(通貨は混ぜない。docs/design.md 増分9節)。
+ * `qtyMismatched`(保有数量を超える売りがあったラウンド)はPF・勝率・R・増し玉寄与の
+ * 集計対象から除外する(Codex P2 + reviewer中3。架空の勝ちラウンド・過大なpnlを計上しない)。
+ */
 export function summarizeByCurrency(rounds: ClosedRound[], currency: Currency): CurrencySummary {
-  const scoped = rounds.filter((r) => r.currency === currency);
+  const scopedAll = rounds.filter((r) => r.currency === currency);
+  const mismatchedCount = scopedAll.filter((r) => r.qtyMismatched).length;
+  const scoped = scopedAll.filter((r) => !r.qtyMismatched);
   const closedRoundCount = scoped.length;
   const winCount = scoped.filter((r) => r.pnl > 0).length;
   const winRate = closedRoundCount > 0 ? winCount / closedRoundCount : null;
@@ -164,6 +183,7 @@ export function summarizeByCurrency(rounds: ClosedRound[], currency: Currency): 
     avgR,
     pyramidRoundCount,
     pyramidContributionTotal,
+    mismatchedCount,
   };
 }
 

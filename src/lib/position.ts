@@ -27,6 +27,14 @@ export interface Position {
 export interface Round {
   trades: Trade[];
   closed: boolean;
+  /**
+   * 保有数量を超える売り(フラット時の単独売りを含む)が1件でもあったか(Codex P2 + reviewer中3)。
+   * データ不整合(買いの削除・誤入力等)の兆候であり、このラウンドのpnl・R・増し玉寄与は
+   * 信頼できない。`src/lib/review.ts`はこのフラグが立つラウンドをPF・勝率・R・増し玉寄与の
+   * 集計から除外し、UI(`ReviewPage.tsx`)はラウンド一覧に警告タグ付きで表示する
+   * (黙って架空の損益を計上しない)。建玉計算(`computePosition`)自体は従来どおり0でクランプする。
+   */
+  qtyMismatched: boolean;
 }
 
 /** 日付→createdAt→idの順で安定ソートする(同日の複数取引でも導出結果を決定的にする)。 */
@@ -49,17 +57,26 @@ export function splitRounds(allTrades: Trade[], tickerId: string): Round[] {
   const rounds: Round[] = [];
   let current: Trade[] = [];
   let qty = 0;
+  let qtyMismatched = false;
 
   for (const t of trades) {
     current.push(t);
-    qty = t.side === "buy" ? qty + t.qty : Math.max(0, qty - t.qty);
+    if (t.side === "buy") {
+      qty += t.qty;
+    } else {
+      // 保有数量を超える売り(フラット時の単独売り含む)は数量不整合として記録する
+      // (Codex P2 + reviewer中3)。0でのクランプ自体は従来どおり(マイナス建玉は作らない)。
+      if (t.qty > qty) qtyMismatched = true;
+      qty = Math.max(0, qty - t.qty);
+    }
     if (qty === 0) {
-      rounds.push({ trades: current, closed: true });
+      rounds.push({ trades: current, closed: true, qtyMismatched });
       current = [];
+      qtyMismatched = false;
     }
   }
   if (current.length > 0) {
-    rounds.push({ trades: current, closed: false });
+    rounds.push({ trades: current, closed: false, qtyMismatched });
   }
   return rounds;
 }

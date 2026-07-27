@@ -30,6 +30,19 @@ function isValidPassedEvent(v: unknown): v is { date: string; tags: string[] } {
   );
 }
 
+/**
+ * ticker1件の`passedEvents`配列を要素単位で正規化する(Codex P2)。不正な要素だけを除去し、
+ * 残りの要素・ticker自体は生かす。以前は`isValidTicker`が`passedEvents.every(isValidPassedEvent)`
+ * で丸ごと真偽判定していたため、配列中1件でも不正だと ticker 自体(銘柄本体)が寛容パースの
+ * フィルタで丸ごと落ちてしまっていた(見送り履歴1件の破損が銘柄そのものを消す事故)。
+ */
+function normalizeRawTicker(v: Record<string, unknown>): Record<string, unknown> {
+  if (Array.isArray(v.passedEvents)) {
+    return { ...v, passedEvents: v.passedEvents.filter(isValidPassedEvent) };
+  }
+  return v;
+}
+
 function isValidTicker(v: unknown): v is Ticker {
   if (typeof v !== "object" || v === null) return false;
   const t = v as Record<string, unknown>;
@@ -74,6 +87,22 @@ function isValidBriefFeedback(v: unknown): v is BriefFeedback {
     typeof b.decidedAt === "string" &&
     typeof b.textPrefix === "string"
   );
+}
+
+/**
+ * trade1件の`stop`を正規化する(Codex P1・後方互換)。`stop: 0`は「stopが未宣言」を表す
+ * 旧形式のデータ(現行のTradeForm・isValidTradeは新規入力でstop=0を拒否するが、それ以前に
+ * 書き出された既存データにはstop:0が残りうる)として扱い、`undefined`(stop未宣言)へ落とす。
+ * ここで正規化しないと`isValidTrade`の`stop > 0`検証に落ちてtrade全体が寛容パースで
+ * 捨てられ、取引記録が丸ごと消える(過去の建玉・R倍数計算が静かに欠落する)。
+ * 新規入力側(`TradeForm.tsx`)のstop=0拒否バリデーションはこの変更の対象外(現状維持)。
+ */
+function normalizeRawTrade(v: Record<string, unknown>): Record<string, unknown> {
+  if (v.stop === 0) {
+    const { stop: _stop, ...rest } = v;
+    return rest;
+  }
+  return v;
 }
 
 /**
@@ -143,10 +172,18 @@ export function parseAppState(
     if (obj.schema_version !== 1) return null;
     if (opts?.strict && !Array.isArray(obj.tickers)) return null;
     const rawTickers = Array.isArray(obj.tickers) ? obj.tickers : [];
-    const tickers = rawTickers.filter(isValidTicker);
+    // 正規化(passedEventsの要素単位フィルタ、Codex P2)してから検証する。
+    const normalizedTickers = rawTickers.map((t) =>
+      typeof t === "object" && t !== null ? normalizeRawTicker(t as Record<string, unknown>) : t,
+    );
+    const tickers = normalizedTickers.filter(isValidTicker);
     // tradesは増分3で追加した加算的フィールド。欠損(旧データ)は空配列として扱う。
     const rawTrades = Array.isArray(obj.trades) ? obj.trades : [];
-    const trades = rawTrades.filter(isValidTrade);
+    // 正規化(stop:0 → stop未宣言、Codex P1)してから検証する。
+    const normalizedTrades = rawTrades.map((t) =>
+      typeof t === "object" && t !== null ? normalizeRawTrade(t as Record<string, unknown>) : t,
+    );
+    const trades = normalizedTrades.filter(isValidTrade);
     if (opts?.stats) {
       opts.stats.droppedTickers = rawTickers.length - tickers.length;
       opts.stats.droppedTrades = rawTrades.length - trades.length;

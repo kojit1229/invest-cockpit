@@ -3,7 +3,7 @@
 // 日証金日次貸借の3ソースから、対象コード1件分だけをその都度fetchして集計する(保存はしない)。
 // ソースごとに独立してfetch・失敗を隔離する(pipeline.tsと同じ方針)。
 
-import { fetchJson } from "./pipeline";
+import { fetchJson, fetchJsonWithStatus } from "./pipeline";
 import { subtractDays } from "./date";
 
 /** 需給ドーナツの1セグメント(凡例1行分)。 */
@@ -229,7 +229,11 @@ async function loadJpxShortSegment(code: string): Promise<{ segment: SupplyDeman
   }
 
   // シャード404は「このプレフィックスに空売り報告銘柄が無い」正常系(docs/design.md (j)節)。
-  const shardRaw = await fetchJson(jpxShortShardUrl(code));
+  // ネットワーク障害・5xx・不正JSON応答("error")とは区別する(Codex P2): 前者は
+  // error:falseのまま「空売り報告なし」として扱ってよいが、後者は「取得不可」を示すべき。
+  const shardResult = await fetchJsonWithStatus(jpxShortShardUrl(code));
+  if (shardResult.kind === "error") return { segment: null, error: true };
+  const shardRaw = shardResult.kind === "ok" ? shardResult.data : null;
   const events = shardRaw === null ? null : readShortEvents(shardRaw, code);
   if (events === null || events.length === 0) return { segment: null, error: false };
 

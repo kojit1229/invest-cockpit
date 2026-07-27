@@ -56,6 +56,27 @@ export async function fetchJson(url: string): Promise<unknown | null> {
   }
 }
 
+/** `fetchJsonWithStatus`の戻り値。404("not-found")とネットワーク障害/5xx/不正JSON("error")を区別する。 */
+export type FetchJsonStatus = { kind: "ok"; data: unknown } | { kind: "not-found" } | { kind: "error" };
+
+/**
+ * `fetchJson`の拡張版(Codex P2)。404(=対象データが存在しない正常系)とネットワーク障害・
+ * 5xx・不正JSON応答(=障害系)を区別して返す。`fetchJson`はこの2つを一律`null`に畳んでしまうため、
+ * 「シャードが無い(正常)」と「取得できなかった(異常)」を区別したい呼び出し側(`supplyDemand.ts`の
+ * JPX空売りシャード取得)がこちらを使う。既存の`fetchJson`呼び出し箇所はこの変更の対象外(現状維持)。
+ */
+export async function fetchJsonWithStatus(url: string): Promise<FetchJsonStatus> {
+  try {
+    const res = await fetch(url, { cache: "no-cache" });
+    if (res.status === 404) return { kind: "not-found" };
+    if (!res.ok) return { kind: "error" };
+    const data = await res.json();
+    return { kind: "ok", data };
+  } catch {
+    return { kind: "error" };
+  }
+}
+
 function isValidScheduleEntry(v: unknown): v is EarningsScheduleEntry {
   if (typeof v !== "object" || v === null) return false;
   const o = v as Record<string, unknown>;
