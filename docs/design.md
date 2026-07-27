@@ -75,6 +75,7 @@ sold(売却済)   --再エントリー検討--> candidate(候補)
 - **第1増分時点の実データ所在**: localStorage(ブラウザ端末内)。これは技術的には「公開でも private でもない、端末ローカル」であり、GitHub Pagesの配信物には含まれない(ソースコードのみが配信される)。ただし端末間同期がないため、複数端末で使う場合は同一の状態が見えない制約がある。この制約はprivate repo同期(後続増分)で解消する。
 - GitHub Pagesの罠(`ai-linked-app-dev` Skill既知の原則): 「repoをprivateにすれば守られる」は誤り。本アプリの公開repoには最初から個人データを書き込む経路を作らない設計とする(ログイン画面も作らない。トークンゲート方式は private同期実装時に導入)。
 - **既知リスク: PATの同一オリジン共有**(reviewer中7): 増分4のfine-grained PAT(`invest_koro_token_v1`)はlocalStorageに平文保存する。`vite.config.ts`の`base: "/invest-cockpit/"`のとおり本アプリはproject pagesであり、オリジンは`https://kojit1229.github.io`で決算ナビ・需給ナビ・TaskChute Journal等と共有される(`src/lib/external.ts`が旧アプリのlocalStorageを読める根拠と表裏)。裏返せば、旧アプリ側のスクリプト(将来の外部ライブラリ導入含む)からこのブラウザ上でPATが読める。GitHub側での鍵の即時無効化はできる(パスワードに比べリスクは絞れる)が、「漏れない」ことを意味しない。設定画面(`SettingsPage.tsx`)の説明文にもこのリスクを明記する。設計変更(トークンの保存先分離等)は今は求めない。
+- **既知リスク: state.jsonの外部送信(増分10a、reviewer中4)**: `batch/brief.sh`は`personal-data/invest-cockpit/state.json`(銘柄・建玉・stop・見送り履歴等)の抽出データを`claude -p`のプロンプトへ埋め込みAnthropicのモデルAPIへ送信する。private側データが外部(自宅端末外)のAI推論エンドポイントへ渡る唯一の経路であり、契約の詳細は(m)節を正典とする。
 
 
 
@@ -122,6 +123,8 @@ interface Trade {
 理由タグのプリセット(`REASON_TAG_PRESETS`): 高値ブレイク / 買い増し(ピラミッディング) / 決算好調 / 損切り / 利確 / ルール外(裁量)。
 
 読み込みの寛容パースは行単位: 不正な`trade`要素は該当行だけを捨て、残りは生かす(`isValidTrade`)。
+
+**`stop: 0`の正規化(Codex P1・後方互換、`src/lib/storage.ts` `normalizeRawTrade`)**: 新規入力(`TradeForm.tsx`)は`stop`を0以下の値では受け付けない(バリデーションエラー)。一方、読み込み時の寛容パースはこの制約を新規入力側の話として切り離す: 既存データに残る`stop: 0`(かつて許容していた・外部生成された等)は「stopが未宣言」の意味だったとみなし、パース時に`stop`フィールドごと取り除いて`undefined`(stop未宣言)へ正規化してから検証する。この正規化を行わずに`isValidTrade`の`stop > 0`検証だけへ通すと、`stop: 0`を含むtrade要素が寛容パースで丸ごと捨てられ、既存の取引記録(建玉・R倍数計算の入力)が静かに消えてしまう。
 
 **建玉導出ルール**(`src/lib/position.ts` `computePosition`。stateには保存せず、`Trade[]`から毎回純関数で計算する)
 
@@ -220,7 +223,7 @@ interface Trade {
 
 ## (i) 増分7: ポジションサイズ計算機・見送りワンタップ
 
-`AppStateV1`に`settings?: AppSettings`(`src/types.ts`)を加算的に追加する。`schema_version`は1のまま。旧データ(欠損)は`undefined`として扱い、`TradeForm`は許容損失額の空欄から始める(`src/lib/storage.ts` `isValidSettings`が数値以外の値を持つフィールドをundefinedへ寛容フォールバックする)。`Ticker`にも`passedEvents?: PassedEvent[]`を加算的に追加する(旧データは空配列扱い、`src/lib/storage.ts` `isValidPassedEvent`が行単位の寛容パースを行う)。
+`AppStateV1`に`settings?: AppSettings`(`src/types.ts`)を加算的に追加する。`schema_version`は1のまま。旧データ(欠損)は`undefined`として扱い、`TradeForm`は許容損失額の空欄から始める(`src/lib/storage.ts` `isValidSettings`が数値以外の値を持つフィールドをundefinedへ寛容フォールバックする)。`Ticker`にも`passedEvents?: PassedEvent[]`を加算的に追加する(旧データは空配列扱い、`src/lib/storage.ts` `isValidPassedEvent`が行単位の寛容パースを行う)。**この行単位パースは要素単位(Codex P2、`normalizeRawTicker`)**: `passedEvents`配列中の不正な要素だけを`filter`で取り除き、ticker本体(銘柄)は落とさない。以前の実装は`isValidTicker`が`passedEvents.every(isValidPassedEvent)`で配列全体の真偽を取っていたため、見送り履歴1件の破損が銘柄そのものを寛容パースのフィルタで丸ごと消してしまっていた。
 
 **ポジションサイズ計算機**(`src/lib/positionSize.ts` `recommendPositionSize`、純関数)
 
@@ -232,7 +235,7 @@ interface Trade {
 
 - 単価・stopの入力欄の直後に許容損失額入力欄(`currencySymbol`で通貨記号のみ表示、`src/lib/format.ts`)を追加する。既定値は設定画面(`#/settings`)の`AppSettings.defaultRiskJPY`/`defaultRiskUSD`(銘柄の通貨に応じてどちらかを`TickerDetail`が選んで渡す)。
 - 単価・stop・許容損失額がすべて入力されると「推奨株数: N株(この取引の最大損失 ¥X)」を自動表示し、「この株数を使う」ボタンで数量欄へ反映する。単価・stopが入力済みでエントリー<=stopの場合はエラー文言のみ表示する(許容損失額の入力有無に関わらず表示する)。
-- 買い増し時(既存建玉あり、`computePosition(trades, tickerId).qty > 0`)は、フォームに入力中のstopを使って「現在の建玉全体でstopに到達した場合の合計損失」も併記する。実装は`qty: 0, price: 0`で当該stopだけを宣言する仮想tradeを既存tradeの末尾に足して`computePosition`へ通す方式(`stopLossAmount`が既存の保有数量・平均取得単価に対して新stopを適用した値になる。今回追加する数量は含めない)。
+- 買い増し時(既存建玉あり、`computePosition(trades, tickerId).qty > 0`)は、フォームに入力中のstopを使って「現在の建玉全体でstopに到達した場合の合計損失」も併記する。実装は`qty: 0, price: 0`で当該stopだけを宣言する仮想tradeを既存tradeの末尾に足して`computePosition`へ通す方式(`stopLossAmount`が既存の保有数量・平均取得単価に対して新stopを適用した値になる。今回追加する数量は含めない)。トレーリングストップ(stopを平均取得単価より上へ引き上げた場合)は`stopLossAmount`が負値になるため、`TickerDetail.tsx`の建玉セクション(reviewer軽微19)と同じく符号でラベルを切り替える(正なら「合計損失」、負なら「到達時利益額(トレーリングストップ)」、値は絶対値で表示。reviewer中2で「合計損失」表記のまま`Math.abs`していた不整合を修正)。
 
 **設定画面**(`src/components/SettingsPage.tsx`)
 
@@ -280,12 +283,15 @@ interface Trade {
 **エラー処理**(既存パターン踏襲。ソースごとに独立、`src/lib/supplyDemand.ts` `loadSupplyDemandData`):
 - 各ソースの「meta+最新データ本体」の取得に失敗した場合のみ、そのソースをエラー扱いにする(`errors`配列)。カルテ側の対象コードがそのソース内に存在しない(0件)ことはエラーではない(JSDA対象外銘柄・空売り報告が無い銘柄は通常のケース)。JPXのシャード404も上記の理由により通常ケース。
 - 3ソースすべてがエラー、かつセグメントが0件 → 「取得不可」。エラー0件でセグメントが0件 → 「需給データなし」。それ以外はドーナツを描画し、エラーになったソースだけ「取得不可: <ソース名>」を凡例末尾に注記する。
+- **JPXシャード取得の404/障害の区別(Codex P2、2026-07-27追加)**: `src/lib/pipeline.ts` `fetchJson`(404も含めすべての失敗を`null`に畳む)はこの区別ができないため、JPX空売りシャード(`loadJpxShortSegment`)専用に`fetchJsonWithStatus`(`{kind:"ok"|"not-found"|"error"}`を返す)を使う。404は`not-found`(=「このプレフィックスに空売り報告銘柄が無い」正常系、`error: false`のまま)、ネットワーク例外・5xx・`res.json()`のパース失敗は`error`(=障害、`error: true`にしてUIに「取得不可」を出す)として区別する。他ソース(JSDA・日証金)のmeta/本体fetchは従来どおり`fetchJson`のまま(このレビュー対応の対象外)。
 
 ## (k) 増分9: 週次レビュー画面
 
 新ルート`#/review`(`src/lib/router.ts`)。今日画面のヘッダー直下に「週次レビューを見る」リンクを置く(`src/app.tsx`)。入力は`state.trades`と`state.tickers`のみ(すべてローカル計算・外部fetch不要・保存はしない。開くたびに再計算する)。実装は`src/lib/review.ts`(純関数群)と`src/components/ReviewPage.tsx`(表示)。
 
 **ラウンドの定義**: 建玉が0になった時点(フラット)を境界とする一連の取引のまとまり(`src/lib/position.ts` `splitRounds`)。増分3の建玉導出(`computePosition`)と本増分の週次レビューが同じ境界基準を共有するよう、ラウンド分割ロジックを`splitRounds`として`position.ts`に抽出し両方から使う(重複実装によるズレを防ぐ)。「クローズ済みラウンド」は`splitRounds`が返す`closed: true`のラウンドのみを指す(直近の未クローズ=保有中のラウンドは週次レビューの集計対象外)。
+
+**数量不整合ラウンドの除外(Codex P2 + reviewer中3、2026-07-27追加)**: `splitRounds`はラウンド内で保有数量を超える売り(買いを一度も記録せず単独で売った退化ケースを含む)を検知すると、そのラウンドに`qtyMismatched: true`を付ける(数量超過分は従来どおり0でクランプし、マイナス建玉は作らない)。`qtyMismatched`なラウンドは、データ不整合(買いの手動削除・誤入力等)が前提のためpnl・R・増し玉寄与の数値を信頼できない。`summarizeByCurrency`はこのフラグが立つラウンドを`closedRoundCount`・勝率・PF・R・増し玉寄与の**すべての集計から除外**し、除外件数を`mismatchedCount`として返す(サマリカードに警告文で表示)。ラウンド一覧表(`RoundListTable`)自体からは除外せず、行に「数量不整合」の警告タグを付けて表示する(黙って架空の損益を計上しない。存在自体はKに見えるようにする)。
 
 **ラウンド損益(pnl)**: 売り合計金額(`Σ qty*price`、売りtradeのみ) − 買い合計金額(`Σ qty*price`、買いtradeのみ)。ラウンドは開始・終了とも建玉0のため、平均単価法を経由せずこの単純差分が正しい実現損益になる。
 
@@ -329,3 +335,25 @@ interface BriefFeedback {
 **読み込みの寛容パース**(`src/lib/storage.ts` `isValidBriefFeedback`): 行単位。不正な要素は該当行だけを捨て、残りは生かす(`isValidPassedEvent`と同じ方針)。旧データ(`briefFeedback`欠損)は空配列として扱う。
 
 **未実装・既知の制約**: 設定画面でトークンを新規設定した直後は、次回ページ再読み込みまでブリーフは再取得されない(マウント時1回のみのfetch。増分4の同期のように`handleTokenChanged`からの即時再取得は行わない。この増分のスコープ外)。
+
+## (m) 増分10a: `batch/brief.sh`(引け後ブリーフ生成バッチ)の契約
+
+(l)節はアプリ側(取得・表示・採否記録)の契約のみを規定する。バッチ本体(`batch/brief.sh` / `brief-collect.py` / `brief-validate.py`)の契約はこの節を正典とする(reviewer中4。以前はスクリプトのヘッダコメントにしか存在しなかった)。
+
+**運用状態(2026-07-27時点)**: `loop/standing-flows.md`のNEVER 9白名単に未登録・K承認待ち。承認が下りるまで実行しない(スクリプト冒頭コメントに同旨を明記)。
+
+**出力ファイル契約(固定・変更不可)**: `personal-data`リポジトリの`invest-cockpit/brief/YYYY-MM-DD.json`。スキーマは(l)節のブリーフ契約と同一(`{schema_version:1, as_of, generated_at, generated_by:"ai", model, summary, counterpoints:[...], health:{sources:{kessan,jukyu,state}}}`)。生成物のバリデーションは`brief-validate.py`が正典で、不正ならファイルを出さずexit 1(フェイルラウド)。
+
+**入力**: `personal-data/invest-cockpit/state.json`(無ければ空状態として続行し`health.state=false`)+ 決算ナビ/需給ナビの公開JSON(GitHub Pages本番)。`brief-collect.py`がソース単位で失敗を隔離する。
+
+**冪等規則**: 冪等キーは`as_of`(=当日日付)の1日1ファイル。`git pull --ff-only`の**後**に当日ファイルの存在をチェックする(他マシンで既に生成・push済みの当日分を見落として二重生成しないため)。当日ファイルが存在し、かつローカルHEADにそのファイルへのcommitはあるが上流(リモート追跡ブランチ)へ届いていない場合(前回実行がcommit後・push前に失敗した状態)は、生成(claude呼び出し)をやり直さずpushだけ再試行する(2026-07-27修正、reviewer中1「M1」: 旧実装はファイル存在だけを見ていたため、push失敗で死んだ日は以後永久に再生成がスキップされ、ブリーフが二度とpushされない穴があった)。`--force`は当日ファイルを無条件に上書きする。
+
+**保持方針**: 削除しない(2026-07-27修正、reviewer重大R1)。旧実装は保持14日を超えた過去ファイルを同コミットで`git rm`していたが、personal-dataへの削除系操作はNEVER 9白名单(b)「作成系のみ」の境界外のため除去した。保持日数の再設計(削除するか・何日分か)はK承認後に別途行う。それまで`brief/`配下は増え続ける。
+
+**予算・多重起動防止**: 実行前に`cost-check.sh --stage invest-koro-brief`で日次予算(既定$1.00、`BRIEF_BUDGET`)を確認し、超過時は今回分をスキップする(queueへは積まない)。同時多重起動はPIDロックファイル(`memory/collect/invest-koro-brief.lock`)で防止する(`analyze-kessan.sh`と同方式)。
+
+**path限定push(二重防御)**: commit前に`personal-data`の変更が`invest-cockpit/brief/`配下だけであることを確認し、それ以外の変更(他バッチが同じ作業ツリーに残した未コミット変更等)を検出したらpushせずdieする(ファイル自体は書き込み済みで失われない)。
+
+**個人データの外部送信(プライバシー注記、reviewer中4)**: `brief.sh`は`state.json`から`brief-collect.py`が抽出したコンテキスト(保有銘柄・建玉数量・平均取得単価・stop・見送り履歴等)と決算ナビ/需給ナビの公開JSONを`claude -p`の標準入力(=プロンプト)としてAnthropicのモデルAPI(`$BRIEF_MODEL`、既定`claude-sonnet-5`)へ送信する。これは本アプリの個人データが自宅端末の外(モデル推論エンドポイント)へ渡る唯一の経路であり、(d)節の公開/privateデータ境界における例外事項として明記する。`--allowedTools ""`でclaude側のツール実行はすべて無効化しており、送信は「プロンプトとしての読み取り専用データ」に限られる(claude側からの追加fetch・ファイル操作は発生しない)。認証情報(GitHubトークン等)は本バッチが直接扱わない(git credential helper任せ)ため、この送信経路には含まれない。
+
+**dry-run**: `git pull`・公開JSON取得・claude呼び出し・push元をすべてスキップし、固定のダミーhealth/candidate JSONで`brief-validate.py`の検証配線だけを確認する(personal-dataへは一切書き込まない)。

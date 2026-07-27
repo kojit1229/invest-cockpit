@@ -13,6 +13,12 @@
 # スケジューラ登録は未承認・手動実行のみ(workspace CLAUDE.md NEVER 10。schtasks登録は
 # 別途K承認が必要)。
 #
+# 重要(reviewer重大R1): このpushフロー(personal-data/invest-cockpit/brief/への自動commit・push)は
+# `loop/standing-flows.md` の NEVER 9 白名単に未登録・K承認待ち。承認まで実行しない。
+# 承認を得たら白名単へ追記すること(その際、旧版にあった保持14日分の`git rm`は
+# 「作成系のみ」の白名単境界を越えるため、削除処理自体は既にこのスクリプトから除去済み。
+# 保持方針(古いブリーフの扱い)はK承認後に別途再設計する)。
+#
 # 出力ファイル契約(監督者確定・変更禁止): personal-data の
 #   `invest-cockpit/brief/YYYY-MM-DD.json`
 #   { schema_version, as_of, generated_at, generated_by:"ai", model, summary,
@@ -45,7 +51,8 @@ PROMPT_FILE="$BATCH_DIR/brief-prompt.md"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
 BRIEF_MODEL="${BRIEF_MODEL:-claude-sonnet-5}"
 BRIEF_BUDGET="${BRIEF_BUDGET:-1.00}"
-KEEP_DAYS="${BRIEF_KEEP_DAYS:-14}"
+# KEEP_DAYS(保持日数)は無し: 旧版は保持14日超をgit rmしていたが、personal-dataへの
+# 削除系操作はNEVER 9白名単外のため削除した(reviewer重大R1)。再設計はK承認後に別途行う。
 
 PERSONAL_REPO="${PERSONAL_REPO:-$ROOT/repos/personal-data}"
 PDATA="$PERSONAL_REPO/invest-cockpit"
@@ -91,18 +98,33 @@ HEALTH_JSON="$WORK_DIR/health.json"
 CANDIDATE_JSON="$WORK_DIR/candidate.json"
 
 if [ "$DRY_RUN" -eq 0 ]; then
-  # ---------- 冪等チェック(実行時のみ。--forceで上書き) ----------
-  if [ -f "$OUT_PATH" ] && [ "$FORCE" -ne 1 ]; then
-    log "既に本日分のブリーフが存在するためスキップ(冪等): $OUT_PATH"
-    exit 0
-  fi
-
   [ -d "$PERSONAL_REPO/.git" ] || die "個人データrepoが無い: $PERSONAL_REPO"
   if ! git -C "$PERSONAL_REPO" pull --ff-only >"$WORK_DIR/pull.log" 2>&1; then
     die "git pull --ff-only に失敗(詳細: $WORK_DIR/pull.log)"
   fi
   log "pull完了: $(tail -1 "$WORK_DIR/pull.log")"
   mkdir -p "$PDATA/brief"
+
+  # ---------- 冪等チェック(M1: git pullの後に置く。他マシンで既に生成・push済みの当日分を
+  # 上書き生成しないようにする。pull前に置くと、ローカルにまだ当日ファイルが無いだけの
+  # 状態で無条件に再生成へ進んでしまう) ----------
+  if [ -f "$OUT_PATH" ] && [ "$FORCE" -ne 1 ]; then
+    # M1: 前回実行が「commit済みだがpush失敗」で死んだ場合、当日ファイルはローカルに
+    # 存在し続けるため、単純な存在チェックだけだと以後永久にスキップされ二度とpushされない。
+    # ローカルHEADにこのファイルへのcommitがあり、かつそれが上流(リモート追跡ブランチ)へ
+    # まだ届いていない場合を区別し、生成(claude呼び出し)はやり直さずpushだけ再試行する。
+    UNPUSHED="$(git -C "$PERSONAL_REPO" log --oneline '@{u}..HEAD' -- "$BRIEF_SUBDIR/$OUT_NAME" 2>/dev/null || true)"
+    if [ -n "$UNPUSHED" ]; then
+      log "ローカルに当日分のcommit済みブリーフがあるがリモート未反映のため、生成をスキップしpushだけ再試行する: $OUT_PATH"
+      if ! git -C "$PERSONAL_REPO" push >"$WORK_DIR/push.log" 2>&1; then
+        die "push再試行に失敗(commit済み、詳細: $WORK_DIR/push.log)"
+      fi
+      log "push再試行に成功: $(git -C "$PERSONAL_REPO" log --oneline -1)"
+      exit 0
+    fi
+    log "既に本日分のブリーフが存在するためスキップ(冪等): $OUT_PATH"
+    exit 0
+  fi
 
   # ---------- 予算確認(workspace CLAUDE.md NEVER 8)。超過は今回スキップ(queueへは積まない) ----------
   if ! bash "$SCRIPTS/cost-check.sh" --budget "$BRIEF_BUDGET" --stage "invest-koro-brief"; then
@@ -219,22 +241,11 @@ fi
 printf '%s\n' "$FINAL_JSON" >"$OUT_PATH"
 log "ブリーフ生成完了: $OUT_PATH"
 
-# ---------- 保持 $KEEP_DAYS 日、古い分は同コミットでgit rm ----------
-(
-  cd "$PDATA/brief" || exit 1
-  files="$(ls -1 2>/dev/null | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.json$' | sort || true)"
-  if [ -n "$files" ]; then
-    total="$(printf '%s\n' "$files" | grep -c .)"
-    if [ "$total" -gt "$KEEP_DAYS" ]; then
-      to_delete="$(printf '%s\n' "$files" | head -n $((total - KEEP_DAYS)))"
-      while IFS= read -r f; do
-        [ -n "$f" ] || continue
-        git -C "$PERSONAL_REPO" rm --quiet -- "$BRIEF_SUBDIR/$f" 2>/dev/null || rm -f "$f"
-        log "古いブリーフを削除(保持は直近${KEEP_DAYS}日分): $f"
-      done <<<"$to_delete"
-    fi
-  fi
-)
+# ---------- 保持ロジック(削除)について(reviewer重大R1 + CLAUDE.md NEVER 9) ----------
+# 旧版はここで保持14日を超えた古いブリーフをgit rmしていたが、personal-dataへの
+# 削除系操作はNEVER 9の白名単((b)「作成系のみ」)の境界外のため削除した。保持方針の
+# 再設計(削除するか・何日分か)はK承認後に別途行う。それまで古いブリーフはpersonal-data
+# 側に増え続ける(削除しないこと自体は安全側)。
 
 # ---------- path限定push(二重防御): brief/以外の変更を検出したら中止する ----------
 # --untracked-files=all必須: 初回のように invest-cockpit/ 配下がまだ何も追跡されていない
