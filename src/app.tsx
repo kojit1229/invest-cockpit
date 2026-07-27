@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { AppStateV1, Market, Ticker, TickerStatus, CURRENCY_BY_MARKET, Trade, TradeInput } from "./types";
 import { loadState, saveState } from "./lib/storage";
-import { nowStr } from "./lib/date";
+import { nowStr, todayStr } from "./lib/date";
 import { useHashRoute } from "./lib/router";
 import { ImportCandidate } from "./lib/external";
 import { computePosition } from "./lib/position";
+import { loadPipelineData, PipelineData } from "./lib/pipeline";
+import { buildJudgmentQueue } from "./lib/events";
 import {
   hasToken,
   pull,
@@ -42,6 +44,34 @@ export function App() {
   const [syncPhase, setSyncPhase] = useState<SyncPhase>(() => (hasToken() ? "idle" : "unset"));
   const [syncError, setSyncError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<{ remoteState: AppStateV1; sha: string } | null>(null);
+
+  // 増分5: 決算ナビ・需給ナビの公開JSONから決定論イベント(今日の判断キュー)を作るための入力データ。
+  // 未取得(pipeline===null)は起動直後の初回fetch待ち。
+  const [pipeline, setPipeline] = useState<PipelineData | null>(null);
+  const jpCodesKey = useMemo(() => {
+    const codes = state.tickers.filter((t) => t.id.startsWith("JP:")).map((t) => t.id.slice(3));
+    return Array.from(new Set(codes)).sort().join(",");
+  }, [state.tickers]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const codes = jpCodesKey === "" ? [] : jpCodesKey.split(",");
+    loadPipelineData(codes).then((data) => {
+      if (!cancelled) setPipeline(data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [jpCodesKey]);
+
+  const today = todayStr();
+  const judgmentEvents = useMemo(
+    () =>
+      pipeline
+        ? buildJudgmentQueue(state.tickers, state.trades ?? [], pipeline.schedule, pipeline.prices, today)
+        : [],
+    [pipeline, state.tickers, state.trades, today],
+  );
 
   // 同期結果でstateを書き換えたとき(remote採用)は、その書き換え自体をpushのトリガーにしない
   // ためのフラグ(直後のuseEffectで一度だけ消費する)。
@@ -274,6 +304,13 @@ export function App() {
               tickers={state.tickers}
               trades={state.trades ?? []}
               onStatusChange={handleStatusChange}
+              events={judgmentEvents}
+              kessanAsOf={pipeline?.kessanAsOf ?? null}
+              jukyuAsOf={pipeline?.jukyuAsOf ?? null}
+              kessanError={pipeline ? pipeline.errors.kessan : false}
+              jukyuError={pipeline ? pipeline.errors.jukyu : false}
+              pipelineLoading={pipeline === null}
+              today={today}
             />
             <AddTickerForm onAdd={handleAdd} />
             <a class="import-link" href="#/import">
@@ -288,6 +325,7 @@ export function App() {
             onStatusChange={handleStatusChange}
             onAddTrade={handleAddTrade}
             onDeleteTrade={handleDeleteTrade}
+            prices={pipeline?.prices ?? new Map()}
           />
         )}
         {route.name === "import" && (

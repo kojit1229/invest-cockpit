@@ -3,6 +3,8 @@ import { STATUS_LABEL_JA, Ticker, TICKER_STATUSES, TickerStatus, Trade, TradeInp
 import { kessanNaviUrl, jukyuNaviUrl } from "../lib/external";
 import { computePosition } from "../lib/position";
 import { formatMoney } from "../lib/format";
+import { PriceSeries } from "../lib/pipeline";
+import { latestClose, weeklyHigh } from "../lib/events";
 import { TradeForm } from "./TradeForm";
 
 interface Props {
@@ -11,6 +13,8 @@ interface Props {
   onStatusChange: (id: string, status: TickerStatus) => void;
   onAddTrade: (input: TradeInput) => void;
   onDeleteTrade: (tradeId: string) => void;
+  /** 増分5: 需給ナビの株価シリーズ(銘柄コード-> シリーズ)。JP銘柄のみ対象。 */
+  prices: Map<string, PriceSeries>;
 }
 
 /** 銘柄IDを市場プレフィックスとコードに分ける。"JP:7203" -> ["JP", "7203"] */
@@ -29,7 +33,7 @@ function sortHistoryDesc(trades: Trade[]): Trade[] {
 }
 
 /** 銘柄カルテ画面(`#/ticker/<id>`)。銘柄の詳細、建玉、取引記録・履歴、旧アプリへの深掘りリンクを表示する。 */
-export function TickerDetail({ ticker, trades, onStatusChange, onAddTrade, onDeleteTrade }: Props) {
+export function TickerDetail({ ticker, trades, onStatusChange, onAddTrade, onDeleteTrade, prices }: Props) {
   const [draftSide, setDraftSide] = useState<TradeSide | null>(null);
 
   if (!ticker) {
@@ -83,6 +87,40 @@ export function TickerDetail({ ticker, trades, onStatusChange, onAddTrade, onDel
           ))}
         </select>
       </label>
+      {market === "JP" && (
+        <div class="ticker-detail__price">
+          <h2>株価</h2>
+          {(() => {
+            const series = prices.get(code);
+            const latest = series ? latestClose(series) : null;
+            const high = series ? weeklyHigh(series) : null;
+            if (!series || !latest || high === null || high <= 0) {
+              return <p class="empty-state empty-state--small">価格データなし(対象226銘柄外)</p>;
+            }
+            const ratio = latest.value / high;
+            return (
+              <dl class="price-info">
+                <dt>最新株価</dt>
+                <dd>
+                  {formatMoney(latest.value, ticker.currency)}({latest.date})
+                </dd>
+                <dt>3年高値からの距離</dt>
+                <dd>
+                  {ratio > 1
+                    ? `高値更新中(3年高値 ${formatMoney(high, ticker.currency)})`
+                    : `残り${((1 - ratio) * 100).toFixed(1)}%(3年高値 ${formatMoney(high, ticker.currency)})`}
+                </dd>
+                {position.qty > 0 && position.currentStop !== null && (
+                  <>
+                    <dt>損切りラインまでの距離</dt>
+                    <dd>{(((latest.value - position.currentStop) / position.currentStop) * 100).toFixed(1)}%</dd>
+                  </>
+                )}
+              </dl>
+            );
+          })()}
+        </div>
+      )}
       <div class="ticker-detail__position">
         <h2>建玉</h2>
         {position.qty === 0 ? (
